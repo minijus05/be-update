@@ -214,6 +214,7 @@ class Config:
     # Scanner settings
     SCANNER_GROUP = '@skaneriss'
     SOUL_SCANNER_BOT = 6872314605
+    SYRAX_SCANNER_BOT = 7488438206
     
     # ML settings
     MIN_TRAINING_SAMPLES = 10
@@ -279,6 +280,19 @@ class TokenMetrics:
     freeze_enabled: int = 0    # Vietoj bool = False
     owner_renounced: int = 0
     total_scans: int = 0      # Vietoj bool = False
+
+    # Nauji laukai iš Syrax Scanner
+    dev_bought_tokens: float = 0.0,
+    dev_bought_sol: float = 0.0,
+    dev_created_tokens: int = 0,
+    same_name_count: int = 0,
+    same_website_count: int = 0,
+    same_telegram_count: int = 0,
+    same_twitter_count: int = 0,
+    bundle_count: int = 0,
+    bundle_supply_percentage: float = 0.0,
+    bundle_curve_percentage: float = 0.0,
+    bundle_sol: float = 0.0
     
     # Optional fields with default values
     ath_multiplier: float = 1.0
@@ -321,7 +335,18 @@ class TokenMetrics:
             'dev_token_percentage': self.dev_token_percentage,
             'telegram_url': self.telegram_url,
             'twitter_url': self.twitter_url,
-            'website_url': self.website_url
+            'website_url': self.website_url,
+            'dev_bought_tokens': self.dev_bought_tokens,
+            'dev_bought_sol': self.dev_bought_sol,
+            'dev_created_tokens': self.dev_created_tokens,
+            'same_name_count': self.same_name_count,
+            'same_website_count': self.same_website_count,
+            'same_telegram_count': self.same_telegram_count,
+            'same_twitter_count': self.same_twitter_count,
+            'bundle_count': self.bundle_count,
+            'bundle_supply_percentage': self.bundle_supply_percentage,
+            'bundle_curve_percentage': self.bundle_curve_percentage,
+            'bundle_sol': self.bundle_sol
         }
     
 @dataclass
@@ -360,6 +385,19 @@ class TokenUpdate:
     dev_token_percentage: float = 0.0
     sniper_wallets: Optional[List[Dict]] = None
     has_24h_data: bool = False
+
+    # Nauji Syrax Scanner laukai
+    dev_bought_tokens: float = 0.0
+    dev_bought_sol: float = 0.0
+    dev_created_tokens: int = 0
+    same_name_count: int = 0
+    same_website_count: int = 0
+    same_telegram_count: int = 0
+    same_twitter_count: int = 0
+    bundle_count: int = 0
+    bundle_supply_percentage: float = 0.0
+    bundle_curve_percentage: float = 0.0
+    bundle_sol: float = 0.0
     
     def to_dict(self) -> dict:
         """Konvertuoja į žodyną"""
@@ -378,7 +416,12 @@ class TokenUpdate:
             self.owner_renounced, self.telegram_url, self.twitter_url, self.website_url,
             self.dev_sol_balance, self.dev_token_percentage,
             self.has_24h_data,
-            json.dumps(self.sniper_wallets) if self.sniper_wallets else None
+            json.dumps(self.sniper_wallets) if self.sniper_wallets else None,
+            # Nauji Syrax Scanner laukai
+            self.dev_bought_tokens, self.dev_bought_sol, self.dev_created_tokens,
+            self.same_name_count, self.same_website_count, self.same_telegram_count,
+            self.same_twitter_count, self.bundle_count, self.bundle_supply_percentage,
+            self.bundle_curve_percentage, self.bundle_sol
             
         )
     def __post_init__(self):
@@ -2837,7 +2880,7 @@ class GemFinder:
     async def _collect_token_data(self, token_address: str) -> Optional[TokenMetrics]:
         """Renka informaciją apie token'ą iš visų šaltinių"""
         
-        logger.info(f"[2025-01-31 12:39:29] Collecting data for {token_address}")
+        logger.info(f"[2025-02-08 22:44:16] Collecting data for {token_address}")
         
         try:
             # Siunčiame token'ą į scanner grupę
@@ -2845,14 +2888,16 @@ class GemFinder:
                 Config.SCANNER_GROUP,
                 token_address
             )
-            logger.info(f"[2025-01-31 12:39:29] Sent token to scanner group: {token_address}")
+            logger.info(f"[2025-02-08 22:44:16] Sent token to scanner group: {token_address}")
 
             # Laukiame atsakymų iš botų
             timeout = 30
             start_time = time.time()
             last_check_time = 0
             soul_data = None
-            all_responses = []  # Saugosime visus atsakymus
+            syrax_data = None
+            soul_responses = []  # Saugosime Soul Scanner atsakymus
+            syrax_responses = []  # Saugosime Syrax Scanner atsakymus
             
             while time.time() - start_time < timeout:
                 if time.time() - last_check_time >= 2:
@@ -2863,6 +2908,7 @@ class GemFinder:
                         limit=20,
                         min_id=original_message.id
                     ):
+                        # Soul Scanner logika
                         if message.sender_id == Config.SOUL_SCANNER_BOT:
                             message_text = message.text
                             
@@ -2870,19 +2916,41 @@ class GemFinder:
                             if token_address not in message_text:
                                 continue
                             
-                            # Pridedame į atsakymų sąrašą
-                            all_responses.append(message_text)
+                            # Pridedame į Soul atsakymų sąrašą
+                            soul_responses.append(message_text)
+                            
+                        # Syrax Scanner logika
+                        elif message.sender_id == Config.SYRAX_SCANNER_BOT:
+                            message_text = message.text
+                            
+                            # Patikrinimas ar žinutėje yra mūsų ieškomas adresas
+                            if token_address not in message_text:
+                                continue
+                            
+                            # Pridedame į Syrax atsakymų sąrašą
+                            syrax_responses.append(message_text)
                     
-                    # Jei turime atsakymų, naudojame paskutinį (naujausią)
-                    if all_responses:
-                        latest_message = all_responses[-1]
-                        logger.info(f"[2025-01-31 12:39:29] Soul Scanner response received (Response {len(all_responses)} of {len(all_responses)})")
-                        soul_data = self.parse_soul_scanner_response(latest_message)
+                    # Apdorojame Soul Scanner atsakymus
+                    if soul_responses:
+                        latest_soul_message = soul_responses[-1]
+                        logger.info(f"[2025-02-08 22:44:16] Soul Scanner response received (Response {len(soul_responses)} of {len(soul_responses)})")
+                        soul_data = self.parse_soul_scanner_response(latest_soul_message)
                         
                         if soul_data:
-                            logger.info(f"[2025-01-31 12:39:29] Soul Scanner data parsed successfully")
+                            logger.info(f"[2025-02-08 22:44:16] Soul Scanner data parsed successfully")
                             for key, value in sorted(soul_data.items()):
-                                logger.info(f"[2025-01-31 12:39:29] {key}: {value}")
+                                logger.info(f"[2025-02-08 22:44:16] {key}: {value}")
+                    
+                    # Apdorojame Syrax Scanner atsakymus
+                    if syrax_responses:
+                        latest_syrax_message = syrax_responses[-1]
+                        logger.info(f"[2025-02-08 22:44:16] Syrax Scanner response received (Response {len(syrax_responses)} of {len(syrax_responses)})")
+                        syrax_data = self.parse_syrax_scanner_response(latest_syrax_message)
+                        
+                        if syrax_data:
+                            logger.info(f"[2025-02-08 22:44:16] Syrax Scanner data parsed successfully")
+                            for key, value in sorted(syrax_data.items()):
+                                logger.info(f"[2025-02-08 22:44:16] {key}: {value}")
                             
                             # Konstruojame TokenMetrics objektą
                             token_data = TokenMetrics(
@@ -2915,7 +2983,20 @@ class GemFinder:
                                 website_url=soul_data.get('social_links', {}).get('WEB'),
                                 
                                 dev_sol_balance=soul_data.get('dev', {}).get('sol_balance', 0.0),
-                                dev_token_percentage=soul_data.get('dev', {}).get('token_percentage', 0.0)
+                                dev_token_percentage=soul_data.get('dev', {}).get('token_percentage', 0.0),
+
+                                # Syrax Scanner papildomi duomenys
+                                dev_bought_tokens=syrax_data.get('dev_bought', {}).get('tokens', 0.0),
+                                dev_bought_sol=syrax_data.get('dev_bought', {}).get('sol', 0.0),
+                                dev_created_tokens=syrax_data.get('dev_created_tokens', 0),
+                                same_name_count=syrax_data.get('same_name_count', 0),
+                                same_website_count=syrax_data.get('same_website_count', 0),
+                                same_telegram_count=syrax_data.get('same_telegram_count', 0),
+                                same_twitter_count=syrax_data.get('same_twitter_count', 0),
+                                bundle_count=syrax_data.get('bundle', {}).get('count', 0),
+                                bundle_supply_percentage=syrax_data.get('bundle', {}).get('supply_percentage', 0.0),
+                                bundle_curve_percentage=syrax_data.get('bundle', {}).get('curve_percentage', 0.0),
+                                bundle_sol=syrax_data.get('bundle', {}).get('sol', 0.0)
                             )
                             
                             if token_data.market_cap > 0 and token_data.ath_market_cap > 0:
@@ -3319,6 +3400,190 @@ class GemFinder:
         except Exception as e:
             self.logger.error(f"Error parsing message: {str(e)}")
             return {}
+
+    def parse_syrax_scanner_response(self, text: str) -> Dict:
+        """Parse Syrax Scanner message"""
+        try:
+            data = {
+                'dev_bought': {
+                    'tokens': 0.0,
+                    'sol': 0.0,
+                    'percentage': 0.0,
+                    'curve_percentage': 0.0
+                },
+                'dev_created_tokens': 0,
+                'same_name_count': 0,
+                'same_website_count': 0,
+                'same_telegram_count': 0,
+                'same_twitter_count': 0,
+                'bundle': {
+                    'count': 0,
+                    'supply_percentage': 0.0,
+                    'curve_percentage': 0.0,
+                    'sol': 0.0
+                },
+                'sniper_activity': {
+                    'tokens': 0.0,
+                    'percentage': 0.0,
+                    'sol': 0.0
+                }
+            }
+
+            # Patikriname ar yra tekstas
+            if not text:
+                logger.warning(f"[2025-02-08 23:22:39] Empty text received in parse_syrax_scanner_response")
+                return data
+
+            # Padalijame tekstą į eilutes ir ieškome Special Remarks sekcijos
+            lines = text.split('\n')
+            special_remarks_found = False
+            remarks_lines = []
+
+            for i, line in enumerate(lines):
+                if 'Special Remarks:' in line:
+                    special_remarks_found = True
+                    remarks_lines = lines[i+1:]  # Imame visas eilutes po "Special Remarks:"
+                    break
+
+            if not special_remarks_found:
+                logger.warning(f"[2025-02-08 23:22:39] No 'Special Remarks:' section found in text")
+                return data
+
+            # Apdorojame tik Special Remarks eilutes
+            for line in remarks_lines:
+                if not line.strip():  # Skip empty lines
+                    continue
+
+                try:
+                    clean_line = self.clean_line(line)
+                    
+                    # Dev bought info
+                    if 'Dev bought' in line:
+                        matches = re.search(r'Dev bought ([\d,.]+[KMB]?) tokens? with ([\d.]+) SOL or ([\d.]+)% \(([\d.]+)% of curve\)', line)
+                        if matches:
+                            tokens_str = matches.group(1).replace(',', '')
+                            # Konvertuojame K/M/B į skaičius
+                            multiplier = 1
+                            if 'K' in tokens_str:
+                                multiplier = 1000
+                                tokens_str = tokens_str.replace('K', '')
+                            elif 'M' in tokens_str:
+                                multiplier = 1000000
+                                tokens_str = tokens_str.replace('M', '')
+                            elif 'B' in tokens_str:
+                                multiplier = 1000000000
+                                tokens_str = tokens_str.replace('B', '')
+                                
+                            data['dev_bought'].update({
+                                'tokens': float(tokens_str) * multiplier,
+                                'sol': float(matches.group(2)),
+                                'percentage': float(matches.group(3)),
+                                'curve_percentage': float(matches.group(4))
+                            })
+                            logger.info(f"[2025-02-08 23:22:39] Parsed dev bought info: {data['dev_bought']}")
+
+                    # Dev created tokens
+                    elif 'Dev created' in line:
+                        match = re.search(r'Dev created (\d+)', line)
+                        if match:
+                            data['dev_created_tokens'] = int(match.group(1))
+                            logger.info(f"[2025-02-08 23:22:39] Parsed dev created tokens: {data['dev_created_tokens']}")
+
+                    # Same name count
+                    elif 'name is the same' in line:
+                        match = re.search(r'same as (\d+)', line)
+                        if match:
+                            data['same_name_count'] = int(match.group(1))
+                            logger.info(f"[2025-02-08 23:22:39] Parsed same name count: {data['same_name_count']}")
+
+                    # Same website count
+                    elif 'website is the same' in line:
+                        match = re.search(r'same as (\d+)', line)
+                        if match:
+                            data['same_website_count'] = int(match.group(1))
+                            logger.info(f"[2025-02-08 23:22:39] Parsed same website count: {data['same_website_count']}")
+
+                    # Same telegram count
+                    elif 'telegram is the same' in line:
+                        match = re.search(r'same as (\d+)', line)
+                        if match:
+                            data['same_telegram_count'] = int(match.group(1))
+                            logger.info(f"[2025-02-08 23:22:39] Parsed same telegram count: {data['same_telegram_count']}")
+
+                    # Same twitter count
+                    elif 'twitter is the same' in line:
+                        match = re.search(r'same as (\d+)', line)
+                        if match:
+                            data['same_twitter_count'] = int(match.group(1))
+                            logger.info(f"[2025-02-08 23:22:39] Parsed same twitter count: {data['same_twitter_count']}")
+
+                    # Bundle info
+                    elif 'notable bundle(s) detected' in line:
+                        matches = re.search(r'(\d+) notable bundle.*?, ([\d.]+)% of supply \(([\d.]+)% of curve\) with ([\d.]+) SOL', line)
+                        if matches:
+                            data['bundle'].update({
+                                'count': int(matches.group(1)),
+                                'supply_percentage': float(matches.group(2)),
+                                'curve_percentage': float(matches.group(3)),
+                                'sol': float(matches.group(4))
+                            })
+                            logger.info(f"[2025-02-08 23:22:39] Parsed bundle info: {data['bundle']}")
+
+                except Exception as e:
+                    logger.warning(f"[2025-02-08 23:22:39] Error parsing line '{line}': {str(e)}")
+                    continue
+
+            return data
+
+        except Exception as e:
+            logger.error(f"[2025-02-08 23:22:39] Error in parse_syrax_scanner_response: {str(e)}")
+            return data
+
+    async def check_syrax_metrics(self, token_address: str, syrax_data: Dict) -> None:
+        """Tikrina Syrax Scanner metrikas ir siunčia įspėjimus jei reikia"""
+        try:
+            current_time = datetime.utcnow()
+            formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            warnings = []
+            
+            # Tikriname same name count
+            if 0 < syrax_data.get('same_name_count', 0) < 500:
+                warnings.append(f"🔍 Same name count: {syrax_data['same_name_count']}")
+                
+            # Tikriname same website count
+            if 0 < syrax_data.get('same_website_count', 0) < 500:
+                warnings.append(f"🌐 Same website count: {syrax_data['same_website_count']}")
+                
+            # Tikriname same telegram count
+            if 0 < syrax_data.get('same_telegram_count', 0) < 500:
+                warnings.append(f"📱 Same telegram count: {syrax_data['same_telegram_count']}")
+                
+            # Tikriname same twitter count
+            if 0 < syrax_data.get('same_twitter_count', 0) < 500:
+                warnings.append(f"🐦 Same twitter count: {syrax_data['same_twitter_count']}")
+            
+            # Jei yra įspėjimų, siunčiame į Telegram
+            if warnings:
+                message = (
+                    f"⚠️ **Low Similarity Alert**\n\n"
+                    f"**Token:** `{token_address}`\n\n"
+                    f"**Metrics:**\n{chr(10).join(warnings)}\n\n"
+                    f"**Time:** `{formatted_time}`\n\n"
+                    f"💡 _Low similarity counts might indicate a new legitimate project_"
+                )
+                
+                # Siunčiame žinutę per token handler
+                if self.token_handler and self.token_handler.telegram_client:
+                    await self.token_handler.telegram_client.send_message(
+                        Config.TELEGRAM_ALERT_GROUP,
+                        message,
+                        parse_mode='markdown'
+                    )
+                    logger.info(f"[{formatted_time}] Sent similarity metrics alert for {token_address}")
+                
+        except Exception as e:
+            logger.error(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Error checking Syrax metrics: {str(e)}")
 
 if __name__ == "__main__":
     try:
