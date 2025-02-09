@@ -350,7 +350,7 @@ class TokenMetrics:
     owner_renounced: int = 0
     total_scans: int = 0      # Vietoj bool = False
 
-    # Nauji laukai iš Syrax Scanner
+    # Syrax Scanner fields
     dev_bought_tokens: float = 0.0
     dev_bought_sol: float = 0.0
     dev_created_tokens: int = 0
@@ -362,6 +362,17 @@ class TokenMetrics:
     bundle_supply_percentage: float = 0.0
     bundle_curve_percentage: float = 0.0
     bundle_sol: float = 0.0
+
+    # Notable bundle metrics - NEW
+    notable_bundle_count: int = 0
+    notable_bundle_supply: float = 0.0
+    notable_bundle_curve: float = 0.0
+    notable_bundle_sol: float = 0.0
+
+    # Sniper activity metrics - NEW
+    sniper_activity_tokens: float = 0.0
+    sniper_activity_percentage: float = 0.0
+    sniper_activity_sol: float = 0.0
     
     # Optional fields with default values
     ath_multiplier: float = 1.0
@@ -415,7 +426,15 @@ class TokenMetrics:
             'bundle_count': self.bundle_count,
             'bundle_supply_percentage': self.bundle_supply_percentage,
             'bundle_curve_percentage': self.bundle_curve_percentage,
-            'bundle_sol': self.bundle_sol
+            'bundle_sol': self.bundle_sol,
+            # New fields
+            'notable_bundle_count': self.notable_bundle_count,
+            'notable_bundle_supply': self.notable_bundle_supply,
+            'notable_bundle_curve': self.notable_bundle_curve,
+            'notable_bundle_sol': self.notable_bundle_sol,
+            'sniper_activity_tokens': self.sniper_activity_tokens,
+            'sniper_activity_percentage': self.sniper_activity_percentage,
+            'sniper_activity_sol': self.sniper_activity_sol
         }
     
 @dataclass
@@ -467,6 +486,16 @@ class TokenUpdate:
     bundle_supply_percentage: float = 0.0
     bundle_curve_percentage: float = 0.0
     bundle_sol: float = 0.0
+    # Notable bundle fields - NEW
+    notable_bundle_count: int = 0
+    notable_bundle_supply: float = 0.0
+    notable_bundle_curve: float = 0.0
+    notable_bundle_sol: float = 0.0
+
+    # Sniper activity fields - NEW
+    sniper_activity_tokens: float = 0.0
+    sniper_activity_percentage: float = 0.0
+    sniper_activity_sol: float = 0.0
     
     def to_dict(self) -> dict:
         """Konvertuoja į žodyną"""
@@ -490,7 +519,14 @@ class TokenUpdate:
             self.dev_bought_tokens, self.dev_bought_sol, self.dev_created_tokens,
             self.same_name_count, self.same_website_count, self.same_telegram_count,
             self.same_twitter_count, self.bundle_count, self.bundle_supply_percentage,
-            self.bundle_curve_percentage, self.bundle_sol
+            self.bundle_curve_percentage, self.bundle_sol,
+            # Notable bundle laukai
+            self.notable_bundle_count, self.notable_bundle_supply,
+            self.notable_bundle_curve, self.notable_bundle_sol,
+            
+            # Sniper activity laukai
+            self.sniper_activity_tokens, self.sniper_activity_percentage,
+            self.sniper_activity_sol
             
         )
     def __post_init__(self):
@@ -3451,7 +3487,17 @@ class GemFinder:
                                 bundle_count=syrax_data.get('bundle', {}).get('count', 0),
                                 bundle_supply_percentage=syrax_data.get('bundle', {}).get('supply_percentage', 0.0),
                                 bundle_curve_percentage=syrax_data.get('bundle', {}).get('curve_percentage', 0.0),
-                                bundle_sol=syrax_data.get('bundle', {}).get('sol', 0.0)
+                                bundle_sol=syrax_data.get('bundle', {}).get('sol', 0.0),
+                                # Notable bundle info - NEW
+                                notable_bundle_count=syrax_data.get('notable_bundle', {}).get('count', 0),
+                                notable_bundle_supply=syrax_data.get('notable_bundle', {}).get('supply_percentage', 0.0),
+                                notable_bundle_curve=syrax_data.get('notable_bundle', {}).get('curve_percentage', 0.0),
+                                notable_bundle_sol=syrax_data.get('notable_bundle', {}).get('sol', 0.0),
+
+                                # Sniper activity info - NEW
+                                sniper_activity_tokens=syrax_data.get('sniper_activity', {}).get('tokens', 0.0),
+                                sniper_activity_percentage=syrax_data.get('sniper_activity', {}).get('percentage', 0.0),
+                                sniper_activity_sol=syrax_data.get('sniper_activity', {}).get('sol', 0.0)
                             )
                             
                             if token_data.market_cap > 0 and token_data.ath_market_cap > 0:
