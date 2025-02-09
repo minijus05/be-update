@@ -38,12 +38,28 @@ class AsyncDatabase:
         logger.info(f"[2025-02-09 15:05:05] Adding missing columns...")
         
         try:
-            # Nauji stulpeliai su jų tipais
+            # Visi nauji stulpeliai su jų tipais
             new_columns = {
+                # Syrax Scanner pagrindiniai laukai
+                'dev_bought_tokens': 'REAL DEFAULT 0.0',
+                'dev_bought_sol': 'REAL DEFAULT 0.0',
+                'dev_created_tokens': 'INTEGER DEFAULT 0',
+                'same_name_count': 'INTEGER DEFAULT 0',
+                'same_website_count': 'INTEGER DEFAULT 0',
+                'same_telegram_count': 'INTEGER DEFAULT 0',
+                'same_twitter_count': 'INTEGER DEFAULT 0',
+                'bundle_count': 'INTEGER DEFAULT 0',
+                'bundle_supply_percentage': 'REAL DEFAULT 0.0',
+                'bundle_curve_percentage': 'REAL DEFAULT 0.0',
+                'bundle_sol': 'REAL DEFAULT 0.0',
+                
+                # Notable bundle laukai
                 'notable_bundle_count': 'INTEGER DEFAULT 0',
                 'notable_bundle_supply': 'REAL DEFAULT 0.0',
                 'notable_bundle_curve': 'REAL DEFAULT 0.0',
                 'notable_bundle_sol': 'REAL DEFAULT 0.0',
+                
+                # Sniper activity laukai
                 'sniper_activity_tokens': 'REAL DEFAULT 0.0',
                 'sniper_activity_percentage': 'REAL DEFAULT 0.0',
                 'sniper_activity_sol': 'REAL DEFAULT 0.0'
