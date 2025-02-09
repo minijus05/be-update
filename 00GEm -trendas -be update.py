@@ -336,26 +336,75 @@ class AsyncDatabase:
                 )
             """)
 
+            # Sukuriame gem_patterns lentelę - analogišką syrax_patterns
             await self.execute("""
-                CREATE TABLE IF NOT EXISTS gems_similarity (
+                CREATE TABLE IF NOT EXISTS gem_patterns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     address TEXT NOT NULL,
-                    name_count INTEGER DEFAULT 0,
-                    website_count INTEGER DEFAULT 0,
-                    telegram_count INTEGER DEFAULT 0,
-                    twitter_count INTEGER DEFAULT 0,
-                    is_gem BOOLEAN DEFAULT FALSE,
-                    discovery_timestamp TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    FOREIGN KEY(address) REFERENCES token_initial_states(address)
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    -- Similarity metrics
+                    same_name_count INTEGER DEFAULT 0,
+                    same_website_count INTEGER DEFAULT 0,
+                    same_telegram_count INTEGER DEFAULT 0,
+                    same_twitter_count INTEGER DEFAULT 0,
+                    
+                    -- Bundle metrics
+                    bundle_count INTEGER DEFAULT 0,
+                    bundle_supply_percentage REAL DEFAULT 0.0,
+                    bundle_curve_percentage REAL DEFAULT 0.0,
+                    bundle_sol REAL DEFAULT 0.0,
+                    
+                    -- Notable bundle metrics
+                    notable_bundle_count INTEGER DEFAULT 0,
+                    notable_bundle_supply REAL DEFAULT 0.0,
+                    notable_bundle_curve REAL DEFAULT 0.0,
+                    notable_bundle_sol REAL DEFAULT 0.0,
+                    
+                    -- Dev metrics
+                    dev_bought_tokens REAL DEFAULT 0.0,
+                    dev_bought_sol REAL DEFAULT 0.0,
+                    dev_bought_percentage REAL DEFAULT 0.0,
+                    dev_bought_curve REAL DEFAULT 0.0,
+                    dev_created_tokens INTEGER DEFAULT 0,
+                    
+                    -- Sniper metrics
+                    sniper_tokens REAL DEFAULT 0.0,
+                    sniper_percentage REAL DEFAULT 0.0,
+                    sniper_sol REAL DEFAULT 0.0,
+                    
+                    -- Analysis results
+                    similarity_risk_score REAL DEFAULT 0.0,
+                    bundle_risk_score REAL DEFAULT 0.0,
+                    dev_risk_score REAL DEFAULT 0.0,
+                    sniper_risk_score REAL DEFAULT 0.0,
+                    total_risk_score REAL DEFAULT 0.0,
+                    
+                    -- Status tracking
+                    is_high_risk BOOLEAN DEFAULT FALSE,
+                    analysis_time TIMESTAMP,
+                    
+                    FOREIGN KEY(address) REFERENCES token_initial_states(address),
+                    UNIQUE(address, timestamp)
                 )
             """)
 
-            # Indeksai gems_similarity lentelei
+            # Indeksai gem_patterns lentelei
             await self.execute("""
-                CREATE INDEX IF NOT EXISTS idx_gems_similarity_address 
-                ON gems_similarity(address)
+                CREATE INDEX IF NOT EXISTS idx_gem_patterns_address 
+                ON gem_patterns(address)
             """)
+
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_gem_patterns_timestamp 
+                ON gem_patterns(timestamp)
+            """)
+
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_gem_patterns_risk 
+                ON gem_patterns(total_risk_score)
+            """)
+           
             
             # Indeksai
             await self.execute("""
@@ -2464,6 +2513,82 @@ class DatabaseManager:
             logger.error(f"[2025-02-09 14:13:46] Error getting Syrax patterns: {e}")
             logger.error(f"Query: {query}")
             logger.error(f"Params: {token_address}, {limit}")
+            return []
+
+    async def save_gem_pattern(self, token_address: str, pattern_data: Dict, analysis: Dict = None):
+        """Išsaugo gem pattern duomenis"""
+        try:
+            query = """
+            INSERT INTO gem_patterns (
+                address, timestamp,
+                same_name_count, same_website_count, same_telegram_count, same_twitter_count,
+                bundle_count, bundle_supply_percentage, bundle_curve_percentage, bundle_sol,
+                notable_bundle_count, notable_bundle_supply, notable_bundle_curve, notable_bundle_sol,
+                dev_bought_tokens, dev_bought_sol, dev_bought_percentage, dev_bought_curve,
+                dev_created_tokens,
+                sniper_tokens, sniper_percentage, sniper_sol,
+                similarity_risk_score, bundle_risk_score, dev_risk_score, sniper_risk_score,
+                total_risk_score, is_high_risk, analysis_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            params = (
+                token_address, 
+                datetime.now(timezone.utc),
+                pattern_data['same_name_count'],
+                pattern_data['same_website_count'],
+                pattern_data['same_telegram_count'],
+                pattern_data['same_twitter_count'],
+                
+                pattern_data['bundle']['count'],
+                pattern_data['bundle']['supply_percentage'],
+                pattern_data['bundle']['curve_percentage'],
+                pattern_data['bundle']['sol'],
+                
+                pattern_data['notable_bundle']['count'],
+                pattern_data['notable_bundle']['supply_percentage'],
+                pattern_data['notable_bundle']['curve_percentage'],
+                pattern_data['notable_bundle']['sol'],
+                
+                pattern_data['dev_bought']['tokens'],
+                pattern_data['dev_bought']['sol'],
+                pattern_data['dev_bought']['percentage'],
+                pattern_data['dev_bought']['curve_percentage'],
+                pattern_data['dev_created_tokens'],
+                
+                pattern_data['sniper_activity']['tokens'],
+                pattern_data['sniper_activity']['percentage'],
+                pattern_data['sniper_activity']['sol'],
+                
+                analysis['risk_scores']['similarity_risk'] if analysis else 0.0,
+                analysis['risk_scores']['bundle_risk'] if analysis else 0.0,
+                analysis['risk_scores']['dev_risk'] if analysis else 0.0,
+                analysis['risk_scores']['sniper_risk'] if analysis else 0.0,
+                analysis['total_risk'] if analysis else 0.0,
+                analysis['is_high_risk'] if analysis else False,
+                datetime.now(timezone.utc)
+            )
+            
+            await self.db.execute(query, params)
+            logger.info(f"[2025-02-09 19:34:15] Saved gem pattern for {token_address}")
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:34:15] Error saving gem pattern: {e}")
+            raise
+
+    async def get_gem_patterns(self, limit: int = 1000) -> List[Dict]:
+        """Gauna gem pattern history mokymui"""
+        try:
+            query = """
+            SELECT * FROM gem_patterns 
+            ORDER BY timestamp DESC 
+            LIMIT ?
+            """
+            results = await self.db.fetch_all(query, (limit,))
+            return [dict(row) for row in results] if results else []
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:34:15] Error getting gem patterns: {e}")
             return []
 
     async def get_high_risk_patterns(self, min_risk: float = 0.7) -> List[Dict]:
