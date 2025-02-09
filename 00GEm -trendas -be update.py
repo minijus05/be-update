@@ -3127,8 +3127,14 @@ class GemFinder:
         important_emoji = ['💠', '🤍', '✅', '❌', '🔻', '🐟', '🍤', '🐳', '🌱', '🕒', '📈', '⚡️', '👥', '🔗', '🦅', '🔫', '⚠️', '🛠', '🔝', '🔥', '💧', '😳', '🤔', '🚩', '📦', '🎯',
             '👍', '💰', '💼']
         
-        # Pašalinam Markdown ir URL
-        cleaned = re.sub(r'\*\*|\[.*?\]|\(https?://[^)]+\)', '', text)
+        # 1. Pašalinam Markdown žymėjimą
+        cleaned = re.sub(r'\*\*', '', text)
+        
+        # 2. Pašalinam URL formatu [text](url)
+        cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)
+        
+        # 3. Pašalinam likusius URL skliaustus (...)
+        cleaned = re.sub(r'\((?:https?:)?//[^)]+\)', '', cleaned)
     
         # Pašalinam visus specialius simbolius, išskyrus svarbius emoji
         result = ''
@@ -3562,38 +3568,38 @@ class GemFinder:
                             data['bundle']['curve_percentage'] = float(curve_match.group(1))
                         if sol_match:
                             data['bundle']['sol'] = float(sol_match.group(1))
-
+                    
                     # Notable bundle info (📦 notable bundle(s))
                     if '📦' in clean_line and 'notable bundle' in clean_line:
-                        count_match = re.search(r'(\d+) notable', clean_line)
-                        supply_match = re.search(r'(\d+\.?\d*)% of supply', clean_line)  # Pridėjom "of supply"
-                        curve_match = re.search(r'\((\d+\.?\d*)% of curve\)', clean_line)
-                        sol_match = re.search(r'with (\d+\.?\d*) SOL', clean_line)  # Pridėjom "with"
+                        # 1. PIRMA išvalom URL su skliaustais ir kablelius po jų
+                        clean_text = re.sub(r'\(http[^)]+\),', '', clean_line)
                         
+
+                        # 2. TADA naudojam TUOS PAČIUS regex'us kaip bundle ir sniper
+                        count_match = re.search(r'📦\s*(\d+)\s*notable', clean_text)
+                        supply_match = re.search(r'(\d+\.?\d*)%\s*of\s*supply', clean_text)
+                        curve_match = re.search(r'\((\d+\.?\d*)%\s*of\s*curve\)', clean_text)
+                        sol_match = re.search(r'(\d+\.?\d*)\s*SOL', clean_text)
+                      
                         if count_match:
-                            data['notable_bundle'] = {  # Naujas atskiras objektas
-                                'count': int(count_match.group(1)),
-                                'supply_percentage': 0.0,
-                                'curve_percentage': 0.0,
-                                'sol': 0.0
-                            }
+                            data['notable_bundle']['count'] = int(count_match.group(1))
                         if supply_match:
                             data['notable_bundle']['supply_percentage'] = float(supply_match.group(1))
                         if curve_match:
                             data['notable_bundle']['curve_percentage'] = float(curve_match.group(1))
                         if sol_match:
                             data['notable_bundle']['sol'] = float(sol_match.group(1))
-
+                            
                     # Sniper activity
-                    if '🎯' in clean_line and 'Notable sniper activity' in clean_line:  # Pakeista iš elif į if
-                        tokens_match = re.search(r'(\d+\.?\d*)([KMB]),\s*(\d+\.?\d*)%\s*tokens', clean_line)
-                        sol_match = re.search(r'(\d+\.?\d*)\s*SOL', clean_line)
+                    if '🎯' in clean_line and 'Notable sniper activity' in clean_line:
+                        tokens_match = re.search(r'(\d+\.?\d*)M', clean_line)           # tik M skaičiams
+                        percentage_match = re.search(r'\((\d+\.?\d*)%\)', clean_line)   # bazinis regex procentams skliausteliuose 
+                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)          # tas pats formatas visiems
                         
                         if tokens_match:
-                            value = float(tokens_match.group(1))
-                            multiplier = {'K': 1000, 'M': 1000000, 'B': 1000000000}[tokens_match.group(2)]
-                            data['sniper_activity']['tokens'] = value * multiplier
-                            data['sniper_activity']['percentage'] = float(tokens_match.group(3))
+                            data['sniper_activity']['tokens'] = float(tokens_match.group(1)) * 1000000
+                        if percentage_match:
+                            data['sniper_activity']['percentage'] = float(percentage_match.group(1))
                         if sol_match:
                             data['sniper_activity']['sol'] = float(sol_match.group(1))
                     
