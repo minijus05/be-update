@@ -1860,6 +1860,7 @@ class DatabaseManager:
     def __init__(self):
         self.db = AsyncDatabase()
         self.is_setup = False
+        self.syrax_analyzer = None 
 
     async def setup_database(self):
         """Initialize database tables"""
@@ -3387,15 +3388,19 @@ class GemFinder:
             await self.db_manager.setup_database()
             logger.info(f"[2025-02-03 17:21:25] Database initialized")
 
-            # Pridėti:
-            self.syrax = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
-            logger.info(f"[2025-02-09 14:40:36] SyraxAnalyzer initialized")
+            
             
             # Tada kuriame kitus komponentus
             self.token_analyzer = TokenAnalyzer(self.db_manager, None)
             self.ml_analyzer = MLAnalyzer(self.db_manager, self.token_analyzer)
             self.token_analyzer.ml = self.ml_analyzer
-            self.db_manager.syrax_analyzer = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
+
+            # Pridėti:
+            self.syrax = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
+            logger.info(f"[2025-02-09 14:40:36] SyraxAnalyzer initialized")
+
+            self.db_manager.syrax_analyzer = self.syrax_analyzer
+            
             self.token_handler = TokenHandler(self.db_manager, self.ml_analyzer)
             
             # Perduodame jau inicializuotą alert klientą
