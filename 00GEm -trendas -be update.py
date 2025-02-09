@@ -2685,6 +2685,71 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"[{datetime.now(timezone.utc)}] Error marking token as failed: {e}")
 
+# Pridedame po DatabaseManager klasės, bet prieš TokenHandler (apie 2400 eilutę):
+
+class SimilarityModel:
+    def __init__(self):
+        self.model = IsolationForest(
+            contamination=0.1,
+            random_state=42
+        )
+        
+    async def prepare_data(self, patterns: List[Dict]) -> Tuple[np.ndarray, List[str]]:
+        """Paruošia duomenis mokymui"""
+        try:
+            features = []
+            feature_names = [
+                'same_name_count', 'same_website_count',
+                'same_telegram_count', 'same_twitter_count',
+                'bundle_count', 'bundle_supply_percentage', 
+                'bundle_curve_percentage', 'bundle_sol',
+                'dev_bought_tokens', 'dev_bought_sol',
+                'dev_created_tokens',
+                'sniper_tokens', 'sniper_percentage'
+            ]
+            
+            for pattern in patterns:
+                feature_vector = [float(pattern.get(name, 0)) for name in feature_names]
+                features.append(feature_vector)
+                
+            return np.array(features), feature_names
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:45:49] Error preparing data: {e}")
+            raise
+            
+    async def train(self, patterns: List[Dict]) -> bool:
+        """Apmoko modelį naudojant GEM patterns"""
+        try:
+            if not patterns:
+                logger.error(f"[2025-02-09 19:45:49] No patterns provided for training")
+                return False
+                
+            X, _ = await self.prepare_data(patterns)
+            self.model.fit(X)
+            
+            logger.info(f"[2025-02-09 19:45:49] Successfully trained model on {len(patterns)} patterns")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:45:49] Error training model: {e}")
+            return False
+            
+    async def predict(self, pattern: Dict) -> Tuple[bool, float]:
+        """Nuspėja ar pattern'as yra panašus į GEM'ų patterns"""
+        try:
+            X, _ = await self.prepare_data([pattern])
+            prediction = self.model.predict(X)[0]
+            score = self.model.score_samples(X)[0]
+            
+            normalized_score = 1 / (1 + np.exp(-score))
+            is_similar = prediction == 1
+            
+            return is_similar, normalized_score
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:45:49] Error predicting: {e}")
+            return False, 0.0
     
 
 class TokenAnalytics:
