@@ -230,7 +230,7 @@ class Config:
     
     # ML modelio parametrai
     ML_SETTINGS = {
-        'min_gem_multiplier': 10.0,
+        'min_gem_multiplier': 5.0,
         'update_interval': 60,  # sekundės
         'confidence_threshold': 0.7,
         'training_data_limit': 1000  # kiek istorinių gem naudoti apmokymui
@@ -563,28 +563,29 @@ class TokenHandler:
                 return
             gmgn_url = f"https://gmgn.ai/sol/token/{token_address}"
 
-            warnings = []
+            # Tikriname visas metrikas iš karto
+            name_count = int(syrax_data.get('same_name_count', 0))
+            website_count = int(syrax_data.get('same_website_count', 0))
+            telegram_count = int(syrax_data.get('same_telegram_count', 0))
+            twitter_count = int(syrax_data.get('same_twitter_count', 0))
             
-            # Tikriname same name count
-            if 0 < syrax_data.get('same_name_count', 0) < 5:
-                warnings.append(f"🔍 Same name count: {syrax_data['same_name_count']}")
-                
-            # Tikriname same website count
-            if 0 < syrax_data.get('same_website_count', 0) < 5:
-                warnings.append(f"🌐 Same website count: {syrax_data['same_website_count']}")
-                
-            # Tikriname same telegram count
-            if 0 < syrax_data.get('same_telegram_count', 0) < 5:
-                warnings.append(f"📱 Same telegram count: {syrax_data['same_telegram_count']}")
-                
-            # Tikriname same twitter count
-            if 0 < syrax_data.get('same_twitter_count', 0) < 5:
-                warnings.append(f"🐦 Same twitter count: {syrax_data['same_twitter_count']}")
+            logger.debug(f"[2025-02-09 01:33:02] Metrics - name: {name_count}, website: {website_count}, telegram: {telegram_count}, twitter: {twitter_count}")
             
-            # Jei yra įspėjimų, siunčiame į Telegram
-            if warnings:
+            # Tikriname ar VISOS metrikos viršija savo limitus
+            if (name_count < 5 and
+                website_count < 50 and
+                telegram_count < 50 and
+                twitter_count < 50):
+                
+                warnings = [
+                    f"🔍 Same name count: {name_count}",
+                    f"🌐 Same website count: {website_count}",
+                    f"📱 Same telegram count: {telegram_count}",
+                    f"🐦 Same twitter count: {twitter_count}"
+                ]
+                
                 message = (
-                    f"⚠️ LOW SIMILARITY DETECTED!\n\n"
+                    f"⚠️ HIGH SIMILARITY DETECTED!\n\n"
                     f"Token Address: <code>{token_address}</code>\n\n"
                     f"Links:\n"
                     f"🔗 <a href='{gmgn_url}'>View on GMGN.AI</a>\n"
@@ -2841,7 +2842,7 @@ class GemFinder:
                 return
             
             # Surenkame Syrax duomenis tik iš Syrax Scanner atsakymo
-            if current_data and current_data.same_telegram_count > 0:  # Jei turime Syrax duomenis
+            if current_data and current_data.same_telegram_count > 0 and "from" not in message:  # Pridėtas "from" patikrinimas
                 syrax_data = {
                     'same_name_count': current_data.same_name_count,
                     'same_website_count': current_data.same_website_count,
@@ -3000,7 +3001,7 @@ class GemFinder:
                             syrax_responses.append(message_text)
                     
                     # Apdorojame Soul Scanner atsakymus
-                    if soul_responses:
+                    if soul_responses and not soul_data:  # Pridėtas not soul_data patikrinimas
                         latest_soul_message = soul_responses[-1]
                         logger.info(f"[2025-02-08 22:44:16] Soul Scanner response received (Response {len(soul_responses)} of {len(soul_responses)})")
                         soul_data = self.parse_soul_scanner_response(latest_soul_message)
@@ -3009,9 +3010,9 @@ class GemFinder:
                             logger.info(f"[2025-02-08 22:44:16] Soul Scanner data parsed successfully")
                             for key, value in sorted(soul_data.items()):
                                 logger.info(f"[2025-02-08 22:44:16] {key}: {value}")
-                    
+
                     # Apdorojame Syrax Scanner atsakymus
-                    if syrax_responses:
+                    if syrax_responses and not syrax_data:  # Pridėtas not syrax_data patikrinimas
                         latest_syrax_message = syrax_responses[-1]
                         logger.info(f"[2025-02-08 22:44:16] Syrax Scanner response received (Response {len(syrax_responses)} of {len(syrax_responses)})")
                         syrax_data = self.parse_syrax_scanner_response(latest_syrax_message)
