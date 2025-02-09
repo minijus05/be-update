@@ -1895,6 +1895,8 @@ class DatabaseManager:
     async def analyze_token_risks(self, token_address: str):
         """Analizuoja token'o rizikas"""
         try:
+            logger.info(f"[{datetime.now(timezone.utc)}] Starting risk analysis for {token_address}")
+            logger.info(f"[{datetime.now(timezone.utc)}] Syrax analyzer exists: {self.syrax_analyzer is not None}")
             query = """
             SELECT * FROM token_initial_states WHERE address = ?
             """
@@ -3317,11 +3319,10 @@ class GemFinder:
             self.ml_analyzer = MLAnalyzer(self.db_manager, self.token_analyzer)
             self.token_analyzer.ml = self.ml_analyzer
 
-            # Pridėti:
-            self.syrax = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
+            self.syrax_analyzer = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
             logger.info(f"[2025-02-09 14:40:36] SyraxAnalyzer initialized")
 
-            self.db_manager.syrax_analyzer = self.syrax_analyzer
+            self.db_manager.syrax_analyzer = self.syrax_analyzer  # Dabar priskiriamas tas pats objektas
             
             self.token_handler = TokenHandler(self.db_manager, self.ml_analyzer)
             
