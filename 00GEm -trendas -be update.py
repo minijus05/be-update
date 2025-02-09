@@ -821,85 +821,7 @@ class TokenHandler:
         except Exception as e:
             logger.error(f"[{datetime.now(timezone.utc)}] Error sending gem notification: {e}")
 
-    # TokenHandler klasėje:
-    async def check_syrax_metrics(self, token_address: str, syrax_data: Dict) -> None:
-        """Tikrina Syrax Scanner metrikas ir siunčia įspėjimus jei reikia"""
-        try:
-            if not self.telegram_client:
-                logger.error(f"[2025-02-09 10:49:01] Telegram client not initialized")
-                return
-            gmgn_url = f"https://gmgn.ai/sol/token/{token_address}"
-
-            # Tikriname visas metrikas iš karto
-            name_count = int(syrax_data.get('same_name_count', 0))
-            website_count = int(syrax_data.get('same_website_count', 0))
-            telegram_count = int(syrax_data.get('same_telegram_count', 0))
-            twitter_count = int(syrax_data.get('same_twitter_count', 0))
-            dev_tokens = int(syrax_data.get('dev_created_tokens', 0))
-            
-            # Bundle info
-            bundle_count = int(syrax_data.get('bundle', {}).get('count', 0))
-            bundle_supply = float(syrax_data.get('bundle', {}).get('supply_percentage', 0))
-            bundle_curve = float(syrax_data.get('bundle', {}).get('curve_percentage', 0))
-            bundle_sol = float(syrax_data.get('bundle', {}).get('sol', 0))
-            
-            # Dev bought info
-            dev_bought_tokens = float(syrax_data.get('dev_bought', {}).get('tokens', 0))
-            dev_bought_sol = float(syrax_data.get('dev_bought', {}).get('percentage', 0))
-            dev_bought_percentage = float(syrax_data.get('dev_bought', {}).get('percentage', 0))
-            dev_bought_curve = float(syrax_data.get('dev_bought', {}).get('curve_percentage', 0))
-            
-            logger.debug(f"[2025-02-09 10:49:01] All metrics - name: {name_count}, website: {website_count}, telegram: {telegram_count}, twitter: {twitter_count}, dev_tokens: {dev_tokens}, bundle: {bundle_count}/{bundle_supply}%/{bundle_curve}%/{bundle_sol}SOL, dev_bought: {dev_bought_tokens}/{dev_bought_sol}/{dev_bought_percentage}%/{dev_bought_curve}%")
-            
-            warnings = []
-            
-            # Tikriname ar metrikos yra mažesnės už limitą
-            if name_count < 500:
-                warnings.append(f"🔍 Same name count: {name_count}")
-            if website_count < 500:
-                warnings.append(f"🌐 Same website count: {website_count}")
-            if telegram_count < 500:
-                warnings.append(f"📱 Same telegram count: {telegram_count}")
-            if twitter_count < 500:
-                warnings.append(f"🐦 Same twitter count: {twitter_count}")
-                
-            # Dev created tokens
-            if dev_tokens > 0:
-                warnings.append(f"👨‍💻 Dev created tokens: {dev_tokens}")
-                
-            # Bundle warnings
-            if bundle_count > 0:
-                warnings.append(f"📦 Bundle detected: {bundle_count} bundles")
-                warnings.append(f"💹 Bundle supply: {bundle_supply}%")
-                warnings.append(f"📊 Bundle curve: {bundle_curve}%")
-                warnings.append(f"💰 Bundle SOL: {bundle_sol} SOL")
-                
-            # Dev bought warnings
-            if dev_bought_tokens > 0:
-                warnings.append(f"👨‍💻 Dev bought tokens: {dev_bought_tokens}")
-                warnings.append(f"💰 Dev bought SOL: {dev_bought_sol}")
-                warnings.append(f"📊 Dev bought percentage: {dev_bought_percentage}%")
-                warnings.append(f"📈 Dev bought curve: {dev_bought_curve}%")
-            
-            # Jei yra įspėjimų, siunčiame žinutę
-            if warnings:
-                message = (
-                    f"⚠️ METRICS ALERT!\\n\\n"
-                    f"Token Address: <code>{token_address}</code>\\n\\n"
-                    f"Links:\\n"
-                    f"🔗 <a href='{gmgn_url}'>View on GMGN.AI</a>\\n\\n"
-                    f"Metrics:\\n"
-                    f"{chr(10).join(warnings)}\\n\\n"
-                    f"<i>Tap token address to copy</i>"
-                )
-                
-                await self._send_notification(message, parse_mode='HTML')
-                logger.info(f"[2025-02-09 10:49:01] Sent metrics alert for {token_address}")
-                    
-        except Exception as e:
-            logger.error(f"[2025-02-09 10:49:01] Error checking Syrax metrics: {str(e)}")
-
-   
+    
 
     async def _send_notification(self, message: str, parse_mode: str = None) -> None:
         """Siunčia pranešimą į Telegram"""
@@ -3524,18 +3446,24 @@ class GemFinder:
             if not current_data:
                 return
             
-            # Surenkame Syrax duomenis tik iš Syrax Scanner atsakymo
-            if current_data and current_data.same_telegram_count > 0 and "from" not in message:  # Pridėtas "from" patikrinimas
-                syrax_data = {
-                    'same_name_count': current_data.same_name_count,
-                    'same_website_count': current_data.same_website_count,
-                    'same_telegram_count': current_data.same_telegram_count,
-                    'same_twitter_count': current_data.same_twitter_count
-                }
-                # Patikriname similarity metrikas per TokenHandler
-                await self.token_handler.check_syrax_metrics(token_address, syrax_data)
-                logger.info(f"Checked Syrax metrics for {token_address}")
-                
+    # PRIDEDAME RIZIKOS ANALIZĘ ČIA
+            risk_analysis = await self.db_manager.analyze_token_risks(token_address)
+            if risk_analysis:
+                logger.info(f"""
+    === RISK ANALYSIS FOR {token_address} ===
+    Token Name: {current_data.name}
+    Similarity Risk: {risk_analysis['risk_scores']['similarity_risk']:.2f}
+    Bundle Risk: {risk_analysis['risk_scores']['bundle_risk']:.2f}
+    Dev Risk: {risk_analysis['risk_scores']['dev_risk']:.2f}
+    HIGH RISK: {'YES' if risk_analysis['is_high_risk'] else 'NO'}
+
+    Similar Projects Found:
+    - Same Name: {risk_analysis['similar_projects']['name_count']}
+    - Same Website: {risk_analysis['similar_projects']['website_count']}
+    - Same Telegram: {risk_analysis['similar_projects']['telegram_count']}
+    - Same Twitter: {risk_analysis['similar_projects']['twitter_count']}
+    """)
+                                       
             if "New" in message or is_new_token:
                 await self.token_handler.handle_new_token(current_data)
             else:
