@@ -99,6 +99,7 @@ class AsyncDatabase:
                     await self.add_missing_columns()
                     await self.show_columns()
                     await self.check_recent_entries()
+                    
                     self.setup_done = True
                 logger.info(f"[{datetime.now(timezone.utc)}] Connected to database: {self.db_path}")
             except Exception as e:
@@ -106,7 +107,7 @@ class AsyncDatabase:
                 raise
 
     async def check_recent_entries(self):
-        """Parodo paskutinius įrašus su naujais stulpeliais"""
+        """Parodo paskutinius įrašus"""
         try:
             query = """
             SELECT 
@@ -124,35 +125,50 @@ class AsyncDatabase:
             
             results = await self.fetch_all(query)
             
-            logger.info(f"[2025-02-09 15:47:15] Recent token entries:")
+            logger.info(f"[{datetime.now(timezone.utc)}] Recent token entries:")
             for result in results:
                 logger.info(f"""
-    [2025-02-09 15:47:15] Token: {result['address']} ({result['name']})
-        Dev metrics:
-            - Bought tokens: {result['dev_bought_tokens']}
-            - Bought SOL: {result['dev_bought_sol']}
-            - Created tokens: {result['dev_created_tokens']}
-        Bundle metrics:
-            - Count: {result['bundle_count']}
-            - Supply %: {result['bundle_supply_percentage']}
-        Notable bundles:
-            - Count: {result['notable_bundle_count']}
-            - Supply: {result['notable_bundle_supply']}
-        Sniper activity:
-            - Tokens: {result['sniper_activity_tokens']}
-            - Percentage: {result['sniper_activity_percentage']}
-        Similar tokens:
-            - Same name: {result['same_name_count']}
-            - Same website: {result['same_website_count']}
-            - Same telegram: {result['same_telegram_count']}
-            - Same twitter: {result['same_twitter_count']}
-        First seen: {result['first_seen']}
+[{datetime.now(timezone.utc)}] Token: {result['address']} ({result['name']})
+    Dev metrics:
+        - Bought tokens: {result['dev_bought_tokens']}
+        - Bought SOL: {result['dev_bought_sol']}
+        - Created tokens: {result['dev_created_tokens']}
+    Bundle metrics:
+        - Count: {result['bundle_count']}
+        - Supply %: {result['bundle_supply_percentage']}
+    Notable bundles:
+        - Count: {result['notable_bundle_count']}
+        - Supply: {result['notable_bundle_supply']}
+    Sniper activity:
+        - Tokens: {result['sniper_activity_tokens']}
+        - Percentage: {result['sniper_activity_percentage']}
+    Similar tokens:
+        - Same name: {result['same_name_count']}
+        - Same website: {result['same_website_count']}
+        - Same telegram: {result['same_telegram_count']}
+        - Same twitter: {result['same_twitter_count']}
+    First seen: {result['first_seen']}
                 """)
                 
         except Exception as e:
-            logger.error(f"[2025-02-09 15:47:15] Error checking entries: {e}")
+            logger.error(f"[{datetime.now(timezone.utc)}] Error checking entries: {e}")
             raise
-                
+
+    async def fetch_all(self, query: str, params=None):
+        """Gauna visus rezultatus iš užklausos"""
+        if not self.conn:
+            await self.connect()
+        async with self.conn.execute(query, params or ()) as cursor:
+            return await cursor.fetchall()
+
+    async def fetch_one(self, query: str, params=None):
+        """Gauna vieną rezultatą iš užklausos"""
+        if not self.conn:
+            await self.connect()
+        async with self.conn.execute(query, params or ()) as cursor:
+            return await cursor.fetchone()
+
+                    
     async def _setup_database(self):
         """Sukuria reikalingas lenteles jei jų nėra"""
         if self.setup_done:
@@ -1887,8 +1903,7 @@ class DatabaseManager:
             logger.error(f"Query: {query}")
             logger.error(f"Params: {params}")
             raise
-                
-          
+                       
         
     async def get_initial_state(self, address: str):
         """Gauna pradinę token'o būseną"""
@@ -1953,6 +1968,44 @@ class DatabaseManager:
             sniper_activity_percentage=result['sniper_activity_percentage'],
             sniper_activity_sol=result['sniper_activity_sol']
         )
+
+    async def analyze_token_risks(self, token_address: str):
+        """Analizuoja token'o rizikas"""
+        try:
+            query = """
+            SELECT * FROM token_initial_states WHERE address = ?
+            """
+            result = await self.fetch_one(query, (token_address,))
+            
+            if result and self.syrax_analyzer:
+                risk_assessment = await self.syrax_analyzer.analyze_metrics(
+                    result['address'],
+                    {
+                        'same_name_count': result['same_name_count'],
+                        'same_website_count': result['same_website_count'],
+                        'same_telegram_count': result['same_telegram_count'],
+                        'same_twitter_count': result['same_twitter_count'],
+                        'bundle_count': result['bundle_count'],
+                        'bundle_supply_percentage': result['bundle_supply_percentage'],
+                        'dev_bought_tokens': result['dev_bought_tokens'],
+                        'dev_bought_sol': result['dev_bought_sol'],
+                        'dev_created_tokens': result['dev_created_tokens']
+                    }
+                )
+                
+                logger.info(f"""
+[{datetime.now(timezone.utc)}] Risk Analysis for {token_address}:
+    Similarity Risk: {risk_assessment['risk_scores']['similarity_risk']:.2f}
+    Bundle Risk: {risk_assessment['risk_scores']['bundle_risk']:.2f}
+    Dev Risk: {risk_assessment['risk_scores']['dev_risk']:.2f}
+    HIGH RISK: {'YES' if risk_assessment['is_high_risk'] else 'NO'}
+                """)
+                
+                return risk_assessment
+        except Exception as e:
+            logger.error(f"[{datetime.now(timezone.utc)}] Error analyzing risks: {e}")
+            return None
+
         
     async def save_initial_state(self, token_data: TokenMetrics):
         """Išsaugo pradinį token'o būvį"""
@@ -3301,6 +3354,7 @@ class GemFinder:
         self.ml_analyzer = None
         self.token_handler = None
         self.processed_messages = set()
+        self.syrax_analyzer = None
 
     async def initialize(self):
         """Inicializuoja visus komponentus"""
@@ -3341,6 +3395,7 @@ class GemFinder:
             self.token_analyzer = TokenAnalyzer(self.db_manager, None)
             self.ml_analyzer = MLAnalyzer(self.db_manager, self.token_analyzer)
             self.token_analyzer.ml = self.ml_analyzer
+            self.db_manager.syrax_analyzer = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
             self.token_handler = TokenHandler(self.db_manager, self.ml_analyzer)
             
             # Perduodame jau inicializuotą alert klientą
