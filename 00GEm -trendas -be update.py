@@ -335,6 +335,27 @@ class AsyncDatabase:
                     UNIQUE(address, timestamp)
                 )
             """)
+
+            await self.execute("""
+                CREATE TABLE IF NOT EXISTS gems_similarity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    address TEXT NOT NULL,
+                    name_count INTEGER DEFAULT 0,
+                    website_count INTEGER DEFAULT 0,
+                    telegram_count INTEGER DEFAULT 0,
+                    twitter_count INTEGER DEFAULT 0,
+                    is_gem BOOLEAN DEFAULT FALSE,
+                    discovery_timestamp TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    FOREIGN KEY(address) REFERENCES token_initial_states(address)
+                )
+            """)
+
+            # Indeksai gems_similarity lentelei
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_gems_similarity_address 
+                ON gems_similarity(address)
+            """)
             
             # Indeksai
             await self.execute("""
@@ -1086,16 +1107,26 @@ class MLAnalyzer:
     async def get_similarity_thresholds(self) -> Dict:
         """Grąžina ML nustatytas similarity ribas"""
         try:
-            # Gaunamos ribos iš ML modelio
-            threshold_data = await self.db.get_latest_token_update(None)  # Tam tikrų statistikų gavimas
-            
-            thresholds = {
-                'name': max(5, threshold_data.get('avg_name_similarity', 5)),
-                'website': max(3, threshold_data.get('avg_website_similarity', 3)),
-                'social': max(8, threshold_data.get('avg_social_similarity', 8))
+            # Nustatome default reikšmes
+            default_thresholds = {
+                'name': 5,
+                'website': 3,
+                'social': 8
             }
-            logger.info(f"[2025-02-09 14:26:02] ML similarity thresholds updated: {thresholds}")
-            return thresholds
+            
+            try:
+                threshold_data = await self.ml.get_latest_token_update(None)
+                if threshold_data:
+                    return {
+                        'name': max(5, threshold_data.get('avg_name_similarity', 5)),
+                        'website': max(3, threshold_data.get('avg_website_similarity', 3)),
+                        'social': max(8, threshold_data.get('avg_social_similarity', 8))
+                    }
+            except Exception as e:
+                logger.error(f"[2025-02-09 14:26:02] Error getting similarity thresholds: {e}")
+                
+            return default_thresholds
+            
         except Exception as e:
             logger.error(f"[2025-02-09 14:26:02] Error getting similarity thresholds: {e}")
             return {'name': 5, 'website': 3, 'social': 8}  # Safe defaults
@@ -1674,44 +1705,53 @@ class SyraxAnalyzer:
         self.similarity_thresholds = None
 
     async def analyze_metrics(self, token_address: str, syrax_data: Dict) -> Dict:
-        """Analizuoja Syrax metrikas, pradedant nuo similarity"""
+        """Analizuoja Syrax metrikas"""
         try:
-            # Pirma analizuojame similarity
-            similarity_risk = await self._analyze_similarity_metrics(syrax_data)
+            if not syrax_data:
+                logger.error(f"[{datetime.now(timezone.utc)}] No Syrax data provided for {token_address}")
+                return None
+                
+            logger.info(f"[{datetime.now(timezone.utc)}] Analyzing Syrax metrics for {token_address}")
             
-            # Jei similarity rizika žema, tik tada tikriname kitas metrikas
-            if similarity_risk < 0.7:  # Ribą nustato ML mokymosi metu
-                bundle_risk = self._analyze_bundle_metrics(syrax_data)
-                dev_risk = self._analyze_dev_metrics(syrax_data)
-            else:
-                # Jei similarity jau rodo riziką, kitos metrikos mažiau svarbios
-                bundle_risk = 0.0
-                dev_risk = 0.0
+            # Similarity rizikos skaičiavimas
+            similarity_risk = max(
+                min(syrax_data.get('same_name_count', 0) / 10.0, 1.0),  # Normalizuojame į [0,1]
+                min(syrax_data.get('same_website_count', 0) / 50.0, 1.0),
+                min(syrax_data.get('same_telegram_count', 0) / 50.0, 1.0),
+                min(syrax_data.get('same_twitter_count', 0) / 50.0, 1.0)
+            )
+            
+            # Bundle rizikos skaičiavimas
+            bundle = syrax_data.get('bundle', {})
+            bundle_risk = max(
+                min(bundle.get('supply_percentage', 0) / 100.0, 1.0),
+                min(bundle.get('curve_percentage', 0) / 100.0, 1.0)
+            )
+            
+            # Dev rizikos skaičiavimas
+            dev_bought = syrax_data.get('dev_bought', {})
+            dev_risk = max(
+                min(dev_bought.get('percentage', 0) / 100.0, 1.0),
+                min(syrax_data.get('dev_created_tokens', 0) / 5.0, 1.0)  # 5+ tokenų = max rizika
+            )
+            
+            # Jei bent viena rizika aukšta - HIGH RISK
+            is_high_risk = (similarity_risk >= 0.7 or bundle_risk >= 0.7 or dev_risk >= 0.7)
             
             risk_assessment = {
-                'timestamp': datetime.now(timezone.utc),
-                'address': token_address,
                 'risk_scores': {
-                    'similarity_risk': similarity_risk,
-                    'bundle_risk': bundle_risk,
-                    'dev_risk': dev_risk
+                    'similarity_risk': round(similarity_risk * 10, 2),  # Konvertuojame į 0-10 skalę
+                    'bundle_risk': round(bundle_risk * 10, 2),
+                    'dev_risk': round(dev_risk * 10, 2)
                 },
-                'similar_projects': {
-                    'name_count': syrax_data['same_name_count'],
-                    'website_count': syrax_data['same_website_count'],
-                    'telegram_count': syrax_data['same_telegram_count'],
-                    'twitter_count': syrax_data['same_twitter_count']
-                },
-                'is_high_risk': similarity_risk >= 0.7
+                'is_high_risk': is_high_risk
             }
             
-            logger.info(f"[2025-02-09 14:33:11] Risk assessment completed for {token_address}")
-            logger.info(f"[2025-02-09 14:33:11] Similarity risk score: {similarity_risk:.2f}")
-            
+            logger.info(f"[{datetime.now(timezone.utc)}] Risk assessment completed: {risk_assessment}")
             return risk_assessment
             
         except Exception as e:
-            logger.error(f"[2025-02-09 14:33:11] Error analyzing Syrax metrics: {e}")
+            logger.error(f"[{datetime.now(timezone.utc)}] Error in analyze_metrics: {e}")
             return None
 
     async def _analyze_similarity_metrics(self, data: Dict) -> float:
@@ -1744,10 +1784,14 @@ class SyraxAnalyzer:
     def _analyze_bundle_metrics(self, data: Dict) -> float:
         """Analizuoja bundle metrikas tik jei similarity rizika žema"""
         try:
-            # Bundle metrikų analizė dabar yra antrinė
+            # Saugus būdas gauti reikšmes
+            bundle_supply = data.get('bundle', {}).get('supply_percentage', 0.0)
+            bundle_curve = data.get('bundle', {}).get('curve_percentage', 0.0)
+            
+            # Bundle metrikų analizė
             bundle_risk = min(
-                data['bundle']['supply_percentage'] / 100.0,  # Normalizuojame į [0,1]
-                data['bundle']['curve_percentage'] / 100.0
+                bundle_supply / 100.0,  # Normalizuojame į [0,1]
+                bundle_curve / 100.0
             )
             return bundle_risk
             
@@ -1758,10 +1802,15 @@ class SyraxAnalyzer:
     def _analyze_dev_metrics(self, data: Dict) -> float:
         """Analizuoja dev metrikas tik jei similarity rizika žema"""
         try:
-            # Dev metrikų analizė taip pat antrinė
+            # Saugus būdas gauti reikšmes
+            dev_bought = data.get('dev_bought', {})
+            dev_percentage = dev_bought.get('percentage', 0.0)
+            dev_created = data.get('dev_created_tokens', 0)
+            
+            # Dev metrikų analizė
             dev_risk = max(
-                data['dev_bought']['percentage'] / 100.0,
-                min(data['dev_created_tokens'] / 10.0, 1.0)  # Normalizuojame, max 10 tokenų
+                dev_percentage / 100.0,
+                min(dev_created / 10.0, 1.0)  # Normalizuojame, max 10 tokenų
             )
             return dev_risk
             
@@ -3447,7 +3496,7 @@ class GemFinder:
             if not current_data:
                 return
             
-    # PRIDEDAME RIZIKOS ANALIZĘ ČIA
+            # RIZIKOS ANALIZĖ - grąžiname paprastą versiją
             risk_analysis = await self.db_manager.analyze_token_risks(token_address)
             if risk_analysis:
                 logger.info(f"""
@@ -3463,8 +3512,7 @@ class GemFinder:
     - Same Website: {risk_analysis['similar_projects']['website_count']}
     - Same Telegram: {risk_analysis['similar_projects']['telegram_count']}
     - Same Twitter: {risk_analysis['similar_projects']['twitter_count']}
-    """)
-                                       
+    """)                                          
             if "New" in message or is_new_token:
                 await self.token_handler.handle_new_token(current_data)
             else:
