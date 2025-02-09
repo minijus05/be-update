@@ -595,6 +595,8 @@ class TokenMetrics:
     bundle_curve_percentage: float = 0.0
     bundle_sol: float = 0.0
 
+    similarity_score: float = 0.0
+
     # Notable bundle metrics - NEW
     notable_bundle_count: int = 0
     notable_bundle_supply: float = 0.0
@@ -786,6 +788,7 @@ class TokenHandler:
 
             # Patikriname similarity prieš skaičiuojant ML predikcijas
             is_similar, similarity_score = await self.analyze_token_similarity(token_data.address)
+            token_data.similarity_score = similarity_score 
             if is_similar:
                 logger.warning(f"[2025-02-09 20:13:09] Token {token_data.address} shows high similarity to known scams (score: {similarity_score:.2f})")
                 return 0.0  # Skip tokens similar to scams
