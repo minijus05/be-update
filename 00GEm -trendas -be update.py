@@ -35,7 +35,7 @@ class AsyncDatabase:
 
     async def add_missing_columns(self):
         """Prideda trūkstamus stulpelius į duomenų bazę"""
-        logger.info(f"[2025-02-09 15:05:05] Adding missing columns...")
+        logger.info(f"[2025-02-09 15:20:49] Adding missing columns...")
         
         try:
             # Visi nauji stulpeliai su jų tipais
@@ -53,13 +53,13 @@ class AsyncDatabase:
                 'bundle_curve_percentage': 'REAL DEFAULT 0.0',
                 'bundle_sol': 'REAL DEFAULT 0.0',
                 
-                # Notable bundle laukai
+                # Notable bundle laukai - nauji
                 'notable_bundle_count': 'INTEGER DEFAULT 0',
                 'notable_bundle_supply': 'REAL DEFAULT 0.0',
                 'notable_bundle_curve': 'REAL DEFAULT 0.0',
                 'notable_bundle_sol': 'REAL DEFAULT 0.0',
                 
-                # Sniper activity laukai
+                # Sniper activity laukai - nauji
                 'sniper_activity_tokens': 'REAL DEFAULT 0.0',
                 'sniper_activity_percentage': 'REAL DEFAULT 0.0',
                 'sniper_activity_sol': 'REAL DEFAULT 0.0'
@@ -72,14 +72,21 @@ class AsyncDatabase:
             existing_columns = [col['name'] for col in current_columns]
             
             # Pridedame tik trūkstamus stulpelius
+            added_columns = []
             for column, type_def in new_columns.items():
                 if column not in existing_columns:
                     query = f"ALTER TABLE token_initial_states ADD COLUMN {column} {type_def}"
                     await self.execute(query)
-                    logger.info(f"[2025-02-09 15:05:05] Added new column: {column}")
+                    added_columns.append(column)
+                    logger.info(f"[2025-02-09 15:20:49] Added new column: {column}")
+            
+            if added_columns:
+                logger.info(f"[2025-02-09 15:20:49] Added {len(added_columns)} new columns: {', '.join(added_columns)}")
+            else:
+                logger.info(f"[2025-02-09 15:20:49] No new columns needed")
         
         except Exception as e:
-            logger.error(f"[2025-02-09 15:05:05] Error adding columns: {e}")
+            logger.error(f"[2025-02-09 15:20:49] Error adding columns: {e}")
             raise
                 
     async def connect(self):
@@ -89,12 +96,62 @@ class AsyncDatabase:
                 self.conn.row_factory = aiosqlite.Row
                 if not self.setup_done:
                     await self._setup_database()
-                    await self.add_missing_columns() 
+                    await self.add_missing_columns()
+                    await self.show_columns()
+                    await self.check_recent_entries()
                     self.setup_done = True
                 logger.info(f"[{datetime.now(timezone.utc)}] Connected to database: {self.db_path}")
             except Exception as e:
                 logger.error(f"[{datetime.now(timezone.utc)}] Database connection error: {e}")
                 raise
+
+    async def check_recent_entries(self):
+        """Parodo paskutinius įrašus su naujais stulpeliais"""
+        try:
+            query = """
+            SELECT 
+                address, name,
+                dev_bought_tokens, dev_bought_sol, dev_created_tokens,
+                bundle_count, bundle_supply_percentage,
+                notable_bundle_count, notable_bundle_supply,
+                sniper_activity_tokens, sniper_activity_percentage,
+                same_name_count, same_website_count, same_telegram_count, same_twitter_count,
+                first_seen
+            FROM token_initial_states 
+            ORDER BY first_seen DESC 
+            LIMIT 5
+            """
+            
+            results = await self.fetch_all(query)
+            
+            logger.info(f"[2025-02-09 15:47:15] Recent token entries:")
+            for result in results:
+                logger.info(f"""
+    [2025-02-09 15:47:15] Token: {result['address']} ({result['name']})
+        Dev metrics:
+            - Bought tokens: {result['dev_bought_tokens']}
+            - Bought SOL: {result['dev_bought_sol']}
+            - Created tokens: {result['dev_created_tokens']}
+        Bundle metrics:
+            - Count: {result['bundle_count']}
+            - Supply %: {result['bundle_supply_percentage']}
+        Notable bundles:
+            - Count: {result['notable_bundle_count']}
+            - Supply: {result['notable_bundle_supply']}
+        Sniper activity:
+            - Tokens: {result['sniper_activity_tokens']}
+            - Percentage: {result['sniper_activity_percentage']}
+        Similar tokens:
+            - Same name: {result['same_name_count']}
+            - Same website: {result['same_website_count']}
+            - Same telegram: {result['same_telegram_count']}
+            - Same twitter: {result['same_twitter_count']}
+        First seen: {result['first_seen']}
+                """)
+                
+        except Exception as e:
+            logger.error(f"[2025-02-09 15:47:15] Error checking entries: {e}")
+            raise
                 
     async def _setup_database(self):
         """Sukuria reikalingas lenteles jei jų nėra"""
@@ -343,6 +400,21 @@ class AsyncDatabase:
             await self.conn.close()
             self.conn = None
             logger.info(f"[2025-01-31 13:22:07] Database connection closed")
+
+    async def show_columns(self):
+        """Parodo visus lentelės stulpelius"""
+        try:
+            query = "PRAGMA table_info(token_initial_states)"
+            columns = await self.fetch_all(query)
+            
+            logger.info(f"[2025-02-09 15:22:42] Database columns:")
+            for col in columns:
+                logger.info(f"[2025-02-09 15:22:42] {col['cid']:>3}. {col['name']:<30} {col['type']}")
+                
+            return columns
+        except Exception as e:
+            logger.error(f"[2025-02-09 15:22:42] Error showing columns: {e}")
+            raise
 
 
 class Config:
@@ -3275,6 +3347,8 @@ class GemFinder:
             self.token_handler.telegram_client = self.alert_client
             
             logger.info(f"[2025-02-03 17:21:25] GemFinder initialized")
+
+           
 
         except Exception as e:
             logger.error(f"[2025-02-03 17:21:25] Error in initialization: {e}")
