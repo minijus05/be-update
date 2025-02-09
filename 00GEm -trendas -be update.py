@@ -136,6 +136,75 @@ class AsyncDatabase:
                     FOREIGN KEY(address) REFERENCES token_initial_states(address)
                 )
             """)
+
+            # Pridedame naują Syrax patterns lentelę
+            await self.execute("""
+                CREATE TABLE IF NOT EXISTS syrax_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    address TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    -- Similarity metrics
+                    same_name_count INTEGER DEFAULT 0,
+                    same_website_count INTEGER DEFAULT 0,
+                    same_telegram_count INTEGER DEFAULT 0,
+                    same_twitter_count INTEGER DEFAULT 0,
+                    
+                    -- Bundle metrics
+                    bundle_count INTEGER DEFAULT 0,
+                    bundle_supply_percentage REAL DEFAULT 0.0,
+                    bundle_curve_percentage REAL DEFAULT 0.0,
+                    bundle_sol REAL DEFAULT 0.0,
+                    
+                    -- Notable bundle metrics
+                    notable_bundle_count INTEGER DEFAULT 0,
+                    notable_bundle_supply REAL DEFAULT 0.0,
+                    notable_bundle_curve REAL DEFAULT 0.0,
+                    notable_bundle_sol REAL DEFAULT 0.0,
+                    
+                    -- Dev metrics
+                    dev_bought_tokens REAL DEFAULT 0.0,
+                    dev_bought_sol REAL DEFAULT 0.0,
+                    dev_bought_percentage REAL DEFAULT 0.0,
+                    dev_bought_curve REAL DEFAULT 0.0,
+                    dev_created_tokens INTEGER DEFAULT 0,
+                    
+                    -- Sniper metrics
+                    sniper_tokens REAL DEFAULT 0.0,
+                    sniper_percentage REAL DEFAULT 0.0,
+                    sniper_sol REAL DEFAULT 0.0,
+                    
+                    -- Analysis results
+                    similarity_risk_score REAL DEFAULT 0.0,
+                    bundle_risk_score REAL DEFAULT 0.0,
+                    dev_risk_score REAL DEFAULT 0.0,
+                    sniper_risk_score REAL DEFAULT 0.0,
+                    total_risk_score REAL DEFAULT 0.0,
+                    
+                    -- Status tracking
+                    is_high_risk BOOLEAN DEFAULT FALSE,
+                    analysis_time TIMESTAMP,
+                    
+                    FOREIGN KEY(address) REFERENCES token_initial_states(address),
+                    UNIQUE(address, timestamp)
+                )
+            """)
+            
+            # Indeksai
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_syrax_address 
+                ON syrax_patterns(address)
+            """)
+            
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_syrax_timestamp 
+                ON syrax_patterns(timestamp)
+            """)
+            
+            await self.execute("""
+                CREATE INDEX IF NOT EXISTS idx_syrax_risk 
+                ON syrax_patterns(total_risk_score)
+            """)
             
             # Indeksai
             await self.execute("CREATE INDEX IF NOT EXISTS idx_token_updates_address ON token_updates(address)")
@@ -1509,9 +1578,8 @@ class DatabaseManager:
             logger.error(f"Query: {query}")
             logger.error(f"Params: {params}")
             raise
-                 
-               
-        
+                
+          
         
     async def get_initial_state(self, address: str):
         """Gauna pradinę token'o būseną"""
@@ -1925,6 +1993,105 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"[{datetime.now(timezone.utc)}] Error getting failed tokens: {e}")
             return []
+        
+    async def save_syrax_pattern(self, token_address: str, syrax_data: Dict, analysis: Dict = None):
+            """Išsaugo Syrax Scanner duomenis"""
+            try:
+                query = """
+                INSERT INTO syrax_patterns (
+                    address, timestamp,
+                    same_name_count, same_website_count, same_telegram_count, same_twitter_count,
+                    bundle_count, bundle_supply_percentage, bundle_curve_percentage, bundle_sol,
+                    notable_bundle_count, notable_bundle_supply, notable_bundle_curve, notable_bundle_sol,
+                    dev_bought_tokens, dev_bought_sol, dev_bought_percentage, dev_bought_curve,
+                    dev_created_tokens,
+                    sniper_tokens, sniper_percentage, sniper_sol,
+                    similarity_risk_score, bundle_risk_score, dev_risk_score, sniper_risk_score,
+                    total_risk_score, is_high_risk, analysis_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                
+                params = (
+                    token_address, 
+                    datetime.now(timezone.utc),
+                    syrax_data['same_name_count'],
+                    syrax_data['same_website_count'],
+                    syrax_data['same_telegram_count'],
+                    syrax_data['same_twitter_count'],
+                    
+                    syrax_data['bundle']['count'],
+                    syrax_data['bundle']['supply_percentage'],
+                    syrax_data['bundle']['curve_percentage'],
+                    syrax_data['bundle']['sol'],
+                    
+                    syrax_data['notable_bundle']['count'],
+                    syrax_data['notable_bundle']['supply_percentage'],
+                    syrax_data['notable_bundle']['curve_percentage'],
+                    syrax_data['notable_bundle']['sol'],
+                    
+                    syrax_data['dev_bought']['tokens'],
+                    syrax_data['dev_bought']['sol'],
+                    syrax_data['dev_bought']['percentage'],
+                    syrax_data['dev_bought']['curve_percentage'],
+                    syrax_data['dev_created_tokens'],
+                    
+                    syrax_data['sniper_activity']['tokens'],
+                    syrax_data['sniper_activity']['percentage'],
+                    syrax_data['sniper_activity']['sol'],
+                    
+                    analysis['risk_scores']['similarity_risk'] if analysis else 0.0,
+                    analysis['risk_scores']['bundle_risk'] if analysis else 0.0,
+                    analysis['risk_scores']['dev_risk'] if analysis else 0.0,
+                    analysis['risk_scores']['sniper_risk'] if analysis else 0.0,
+                    analysis['total_risk'] if analysis else 0.0,
+                    analysis['is_high_risk'] if analysis else False,
+                    datetime.now(timezone.utc)
+                )
+                
+                await self.db.execute(query, params)
+                logger.info(f"[2025-02-09 14:13:46] Saved Syrax pattern for {token_address}")
+                
+            except Exception as e:
+                logger.error(f"[2025-02-09 14:13:46] Error saving Syrax pattern: {e}")
+                logger.error(f"Query: {query}")
+                logger.error(f"Params: {params}")
+                raise
+
+    async def get_syrax_patterns(self, token_address: str, limit: int = 10) -> List[Dict]:
+        """Gauna Syrax patterns istoriją tokenui"""
+        try:
+            query = """
+            SELECT * FROM syrax_patterns 
+            WHERE address = ? 
+            ORDER BY timestamp DESC 
+            LIMIT ?
+            """
+            results = await self.db.fetch_all(query, (token_address, limit))
+            return [dict(row) for row in results] if results else []
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:13:46] Error getting Syrax patterns: {e}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Params: {token_address}, {limit}")
+            return []
+
+    async def get_high_risk_patterns(self, min_risk: float = 0.7) -> List[Dict]:
+        """Gauna visus high risk Syrax patterns"""
+        try:
+            query = """
+            SELECT * FROM syrax_patterns 
+            WHERE total_risk_score >= ?
+            ORDER BY timestamp DESC
+            """
+            results = await self.db.fetch_all(query, (min_risk,))
+            return [dict(row) for row in results] if results else []
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:13:46] Error getting high risk patterns: {e}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Params: {min_risk}")
+            return []
+        
     async def get_latest_token_update(self, token_address: str):
         """Gauna paskutinį token'o atnaujinimą iš DB"""
         try:
@@ -3637,7 +3804,7 @@ class GemFinder:
                     logger.warning(f"[2025-02-09 10:37:11] Error parsing line '{line}': {str(e)}")
                     continue
 
-            logger.info(f"[2025-02-09 10:37:11] Successfully parsed Syrax data: {data}")
+            #logger.info(f"[2025-02-09 10:37:11] Successfully parsed Syrax data: {data}")
             return data
 
         except Exception as e:
