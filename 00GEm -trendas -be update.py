@@ -1216,43 +1216,39 @@ class MLAnalyzer:
                 return {
                     'name': 5,
                     'website': 3,
-                    'telegram': 4,
-                    'twitter': 4
+                    'social': 8  # Bendras social threshold
                 }
 
             # Kaupiame similarity metrikas
             name_similarities = []
             website_similarities = []
-            telegram_similarities = []
-            twitter_similarities = []
+            social_similarities = []  # Bendras social similarities
 
             for pattern in gem_patterns:
                 name_similarities.append(pattern['same_name_count'])
                 website_similarities.append(pattern['same_website_count'])
-                telegram_similarities.append(pattern['same_telegram_count'])
-                twitter_similarities.append(pattern['same_twitter_count'])
+                # Sudedame telegram ir twitter į vieną social metriką
+                social_similarities.append(pattern['same_telegram_count'] + pattern['same_twitter_count'])
 
             # Naudojame 75-tą percentilį kaip threshold kiekvienai metrikai
             thresholds = {
                 'name': max(5, np.percentile(name_similarities, 75)),
                 'website': max(3, np.percentile(website_similarities, 75)),
-                'telegram': max(4, np.percentile(telegram_similarities, 75)),
-                'twitter': max(4, np.percentile(twitter_similarities, 75))
+                'social': max(8, np.percentile(social_similarities, 75))  # Didesnis default threshold socialinei metrikai
             }
 
-            logger.info(f"[2025-02-09 20:48:00] Calculated similarity thresholds:")
+            logger.info(f"[2025-02-09 21:02:49] Calculated similarity thresholds:")
             for metric, value in thresholds.items():
-                logger.info(f"[2025-02-09 20:48:00] {metric}: {value:.2f}")
+                logger.info(f"[2025-02-09 21:02:49] {metric}: {value:.2f}")
 
             return thresholds
 
         except Exception as e:
-            logger.error(f"[2025-02-09 20:48:00] Error calculating similarity thresholds: {e}")
+            logger.error(f"[2025-02-09 21:02:49] Error calculating similarity thresholds: {e}")
             return {
                 'name': 5,
                 'website': 3,
-                'telegram': 4,
-                'twitter': 4
+                'social': 8  # Safe defaults
             }
     
     async def predict_potential(self, token_data: TokenMetrics) -> float:
@@ -1883,29 +1879,28 @@ class SyraxAnalyzer:
         try:
             # Jei neturime ML nustatytų ribų, gauname jas
             if not self.similarity_thresholds:
-                self.similarity_thresholds = await self.ml.get_similarity_thresholds()
+                self.similarity_thresholds = await self.ml.calculate_similarity_thresholds()
             
             # Normalizuojame kiekvieną similarity metriką pagal ML ribas
             name_risk = data['same_name_count'] / self.similarity_thresholds['name']
             website_risk = data['same_website_count'] / self.similarity_thresholds['website']
-            telegram_risk = data['same_telegram_count'] / self.similarity_thresholds['telegram']
-            twitter_risk = data['same_twitter_count'] / self.similarity_thresholds['twitter']
-
-            # Skaičiuojame socialinę riziką kaip telegram ir twitter vidurkį
-            social_risk = (telegram_risk + twitter_risk) / 2
+            # Skaičiuojame social risk kaip telegram + twitter sumą, dalintą iš social threshold
+            social_risk = (data['same_telegram_count'] + data['same_twitter_count']) / self.similarity_thresholds['social']
 
             # Skaičiuojame bendrą similarity riziką
             risk_score = max(name_risk, website_risk, social_risk)
 
             # Loginame similarity detales
-            logger.info(f"[2025-02-09 20:49:24] Similarity analysis:")
-            logger.info(f"[2025-02-09 20:49:24] Name risk: {name_risk:.2f}")
-            logger.info(f"[2025-02-09 20:49:24] Website risk: {website_risk:.2f}")
-            logger.info(f"[2025-02-09 20:49:24] Telegram risk: {telegram_risk:.2f}")
-            logger.info(f"[2025-02-09 20:49:24] Twitter risk: {twitter_risk:.2f}")
-            logger.info(f"[2025-02-09 20:49:24] Combined social risk: {social_risk:.2f}")
+            logger.info(f"[2025-02-09 21:00:58] Similarity analysis:")
+            logger.info(f"[2025-02-09 21:00:58] Name risk: {name_risk:.2f}")
+            logger.info(f"[2025-02-09 21:00:58] Website risk: {website_risk:.2f}")
+            logger.info(f"[2025-02-09 21:00:58] Social risk: {social_risk:.2f}")
             
             return risk_score
+
+        except Exception as e:
+            logger.error(f"[2025-02-09 21:00:58] Error in _analyze_similarity_metrics: {e}")
+            return 0.0
 
     def _analyze_bundle_metrics(self, data: Dict) -> float:
         """Analizuoja bundle metrikas tik jei similarity rizika žema"""
