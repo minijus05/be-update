@@ -32,6 +32,39 @@ class AsyncDatabase:
         self.db_path = Config.DB_PATH
         self.conn = None
         self.setup_done = False
+
+    async def add_missing_columns(self):
+        """Prideda trūkstamus stulpelius į duomenų bazę"""
+        logger.info(f"[2025-02-09 15:05:05] Adding missing columns...")
+        
+        try:
+            # Nauji stulpeliai su jų tipais
+            new_columns = {
+                'notable_bundle_count': 'INTEGER DEFAULT 0',
+                'notable_bundle_supply': 'REAL DEFAULT 0.0',
+                'notable_bundle_curve': 'REAL DEFAULT 0.0',
+                'notable_bundle_sol': 'REAL DEFAULT 0.0',
+                'sniper_activity_tokens': 'REAL DEFAULT 0.0',
+                'sniper_activity_percentage': 'REAL DEFAULT 0.0',
+                'sniper_activity_sol': 'REAL DEFAULT 0.0'
+            }
+            
+            # Gauname esamus stulpelius
+            current_columns = await self.fetch_all(
+                "PRAGMA table_info(token_initial_states)"
+            )
+            existing_columns = [col['name'] for col in current_columns]
+            
+            # Pridedame tik trūkstamus stulpelius
+            for column, type_def in new_columns.items():
+                if column not in existing_columns:
+                    query = f"ALTER TABLE token_initial_states ADD COLUMN {column} {type_def}"
+                    await self.execute(query)
+                    logger.info(f"[2025-02-09 15:05:05] Added new column: {column}")
+        
+        except Exception as e:
+            logger.error(f"[2025-02-09 15:05:05] Error adding columns: {e}")
+            raise
                 
     async def connect(self):
         if not self.conn:
@@ -40,6 +73,7 @@ class AsyncDatabase:
                 self.conn.row_factory = aiosqlite.Row
                 if not self.setup_done:
                     await self._setup_database()
+                    await self.add_missing_columns() 
                     self.setup_done = True
                 logger.info(f"[{datetime.now(timezone.utc)}] Connected to database: {self.db_path}")
             except Exception as e:
@@ -84,6 +118,29 @@ class AsyncDatabase:
                     first_seen TIMESTAMP,
                     status TEXT,
                     sniper_wallets JSON
+                    -- Syrax Scanner fields
+                    dev_bought_tokens REAL,
+                    dev_bought_sol REAL,
+                    dev_created_tokens INTEGER,
+                    same_name_count INTEGER,
+                    same_website_count INTEGER,
+                    same_telegram_count INTEGER,
+                    same_twitter_count INTEGER,
+                    bundle_count INTEGER,
+                    bundle_supply_percentage REAL,
+                    bundle_curve_percentage REAL,
+                    bundle_sol REAL,
+                    
+                    -- Notable bundle fields
+                    notable_bundle_count INTEGER,
+                    notable_bundle_supply REAL,
+                    notable_bundle_curve REAL,
+                    notable_bundle_sol REAL,
+                    
+                    -- Sniper activity fields
+                    sniper_activity_tokens REAL,
+                    sniper_activity_percentage REAL,
+                    sniper_activity_sol REAL
                 )
             """)
             
@@ -1783,7 +1840,30 @@ class DatabaseManager:
             website_url=result['website_url'],
             dev_sol_balance=result['dev_sol_balance'],
             dev_token_percentage=result['dev_token_percentage'],
-            sniper_wallets=json.loads(result['sniper_wallets']) if result['sniper_wallets'] else None 
+            sniper_wallets=json.loads(result['sniper_wallets']) if result['sniper_wallets'] else None ,
+            # Syrax Scanner fields
+            dev_bought_tokens=result['dev_bought_tokens'],
+            dev_bought_sol=result['dev_bought_sol'],
+            dev_created_tokens=result['dev_created_tokens'],
+            same_name_count=result['same_name_count'],
+            same_website_count=result['same_website_count'],
+            same_telegram_count=result['same_telegram_count'],
+            same_twitter_count=result['same_twitter_count'],
+            bundle_count=result['bundle_count'],
+            bundle_supply_percentage=result['bundle_supply_percentage'],
+            bundle_curve_percentage=result['bundle_curve_percentage'],
+            bundle_sol=result['bundle_sol'],
+            
+            # Notable bundle fields
+            notable_bundle_count=result['notable_bundle_count'],
+            notable_bundle_supply=result['notable_bundle_supply'],
+            notable_bundle_curve=result['notable_bundle_curve'],
+            notable_bundle_sol=result['notable_bundle_sol'],
+            
+            # Sniper activity fields
+            sniper_activity_tokens=result['sniper_activity_tokens'],
+            sniper_activity_percentage=result['sniper_activity_percentage'],
+            sniper_activity_sol=result['sniper_activity_sol']
         )
         
     async def save_initial_state(self, token_data: TokenMetrics):
@@ -1800,7 +1880,30 @@ class DatabaseManager:
             token_data.dev_sol_balance, token_data.dev_token_percentage,
             datetime.now(timezone.utc),  # first_seen
             'new',  # status
-            json.dumps(token_data.sniper_wallets) if token_data.sniper_wallets else None  # sniper_wallets
+            json.dumps(token_data.sniper_wallets) if token_data.sniper_wallets else None,  # sniper_wallets,
+            # Syrax Scanner values
+            token_data.dev_bought_tokens,
+            token_data.dev_bought_sol,
+            token_data.dev_created_tokens,
+            token_data.same_name_count,
+            token_data.same_website_count,
+            token_data.same_telegram_count,
+            token_data.same_twitter_count,
+            token_data.bundle_count,
+            token_data.bundle_supply_percentage,
+            token_data.bundle_curve_percentage,
+            token_data.bundle_sol,
+            
+            # Notable bundle values
+            token_data.notable_bundle_count,
+            token_data.notable_bundle_supply,
+            token_data.notable_bundle_curve,
+            token_data.notable_bundle_sol,
+            
+            # Sniper activity values
+            token_data.sniper_activity_tokens,
+            token_data.sniper_activity_percentage,
+            token_data.sniper_activity_sol
         )
 
         query = """
@@ -1814,8 +1917,17 @@ class DatabaseManager:
             ath_market_cap, ath_multiplier,
             owner_renounced, telegram_url, twitter_url, website_url,
             dev_sol_balance, dev_token_percentage,
-            first_seen, status, sniper_wallets
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            first_seen, status, sniper_wallets,
+            dev_bought_tokens, dev_bought_sol, dev_created_tokens,
+            same_name_count, same_website_count, same_telegram_count,
+            same_twitter_count, bundle_count, bundle_supply_percentage,
+            bundle_curve_percentage, bundle_sol,
+            notable_bundle_count, notable_bundle_supply, notable_bundle_curve,
+            notable_bundle_sol, sniper_activity_tokens, sniper_activity_percentage,
+            sniper_activity_sol
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                  ?, ?, ?, ?, ?, ?, ?)
         """
         await self.db.execute(query, base_data)
         
