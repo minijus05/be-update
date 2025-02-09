@@ -2029,6 +2029,33 @@ class DatabaseManager:
             logger.error(f"[{datetime.now(timezone.utc)}] Error analyzing risks: {e}")
             return None
 
+    # DatabaseManager klasėje, apie 1975 eilutę:
+    async def process_gem_for_similarity(self, token_address: str):
+        """
+        Apdoroja token'ą, kuris tapo GEM'u, similarity ML sistemai.
+        Šis metodas yra atskiras nuo mark_as_gem ir veikia lygiagrečiai.
+        """
+        try:
+            current_time = datetime.now(timezone.utc)
+            logger.info(f"[2025-02-09 19:41:43] Processing gem for similarity ML: {token_address}")
+
+            # Gauname paskutinį Syrax pattern'ą
+            syrax_patterns = await self.get_syrax_patterns(token_address, limit=1)
+            if not syrax_patterns:
+                logger.error(f"[2025-02-09 19:41:43] No Syrax patterns found for {token_address}")
+                return False
+
+            # Išsaugome į gem_patterns
+            latest_pattern = syrax_patterns[0]
+            await self.save_gem_pattern(token_address, latest_pattern)
+            
+            logger.info(f"[2025-02-09 19:41:43] Successfully saved gem pattern for {token_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"[2025-02-09 19:41:43] Error processing gem for similarity: {e}")
+            return False
+
         
     async def save_initial_state(self, token_data: TokenMetrics):
         """Išsaugo pradinį token'o būvį"""
