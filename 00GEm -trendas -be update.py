@@ -503,6 +503,7 @@ class TokenHandler:
         self.db = db_manager
         self.ml = ml_analyzer
         self.telegram_client = None
+        self.syrax = SyraxAnalyzer(db_manager, ml_analyzer)
         
     async def handle_new_token(self, token_data: TokenMetrics):
         """Apdoroja naują token'ą"""
