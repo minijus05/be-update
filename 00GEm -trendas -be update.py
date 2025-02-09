@@ -783,6 +783,12 @@ class TokenHandler:
             # Išsaugome pradinę būseną
             await self.db.save_initial_state(token_data)
             logger.info(f"[2025-02-03 14:44:23] Saved initial state for: {token_data.address}")
+
+            # Patikriname similarity prieš skaičiuojant ML predikcijas
+            is_similar, similarity_score = await self.analyze_token_similarity(token_data.address)
+            if is_similar:
+                logger.warning(f"[2025-02-09 20:13:09] Token {token_data.address} shows high similarity to known scams (score: {similarity_score:.2f})")
+                return 0.0  # Skip tokens similar to scams
             
             # Gauname ML predikcijas tik vieną kartą
             initial_prediction = await self.ml.predict_potential(token_data)
@@ -951,6 +957,8 @@ class TokenHandler:
             logger.error(f"[2025-02-03 14:44:23] Error in check_inactive_tokens: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+    
 
     async def analyze_token_similarity(self, token_address: str) -> Tuple[bool, float]:
         """Analizuoja ar token'as yra panašus į žinomus scam'us"""
