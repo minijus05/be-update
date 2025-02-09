@@ -3515,6 +3515,7 @@ class GemFinder:
                 'same_telegram_count': 0,
                 'same_twitter_count': 0,
                 'bundle': {'count': 0, 'supply_percentage': 0.0, 'curve_percentage': 0.0, 'sol': 0.0},
+                'notable_bundle': {'count': 0, 'supply_percentage': 0.0, 'curve_percentage': 0.0, 'sol': 0.0},  # Naujas
                 'sniper_activity': {'tokens': 0.0, 'percentage': 0.0, 'sol': 0.0}
             }
 
@@ -3563,26 +3564,30 @@ class GemFinder:
                             data['bundle']['sol'] = float(sol_match.group(1))
 
                     # Notable bundle info (📦 notable bundle(s))
-                    elif '📦' in clean_line and 'notable bundle' in clean_line:
+                    if '📦' in clean_line and 'notable bundle' in clean_line:
                         count_match = re.search(r'(\d+) notable', clean_line)
-                        supply_match = re.search(r'(\d+\.?\d*)% of supply', clean_line)
+                        supply_match = re.search(r'(\d+\.?\d*)% of supply', clean_line)  # Pridėjom "of supply"
                         curve_match = re.search(r'\((\d+\.?\d*)% of curve\)', clean_line)
-                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                        sol_match = re.search(r'with (\d+\.?\d*) SOL', clean_line)  # Pridėjom "with"
                         
                         if count_match:
-                            data['bundle']['count'] = int(count_match.group(1))
+                            data['notable_bundle'] = {  # Naujas atskiras objektas
+                                'count': int(count_match.group(1)),
+                                'supply_percentage': 0.0,
+                                'curve_percentage': 0.0,
+                                'sol': 0.0
+                            }
                         if supply_match:
-                            data['bundle']['supply_percentage'] = float(supply_match.group(1))
+                            data['notable_bundle']['supply_percentage'] = float(supply_match.group(1))
                         if curve_match:
-                            data['bundle']['curve_percentage'] = float(curve_match.group(1))
+                            data['notable_bundle']['curve_percentage'] = float(curve_match.group(1))
                         if sol_match:
-                            data['bundle']['sol'] = float(sol_match.group(1))
-                    
-                                       
+                            data['notable_bundle']['sol'] = float(sol_match.group(1))
+
                     # Sniper activity
-                    elif '🎯' in clean_line and 'Notable sniper activity' in clean_line:
-                        tokens_match = re.search(r'(\d+\.?\d*)([KMB]) \((\d+\.?\d*)%\) tokens', clean_line)
-                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                    if '🎯' in clean_line and 'Notable sniper activity' in clean_line:  # Pakeista iš elif į if
+                        tokens_match = re.search(r'(\d+\.?\d*)([KMB]),\s*(\d+\.?\d*)%\s*tokens', clean_line)
+                        sol_match = re.search(r'(\d+\.?\d*)\s*SOL', clean_line)
                         
                         if tokens_match:
                             value = float(tokens_match.group(1))
