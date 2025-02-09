@@ -554,6 +554,46 @@ class TokenHandler:
         except Exception as e:
             logger.error(f"[{datetime.now(timezone.utc)}] Error sending gem notification: {e}")
 
+    async def check_syrax_metrics(self, token_address: str, syrax_data: Dict) -> None:
+        """Tikrina Syrax Scanner metrikas ir siunčia įspėjimus jei reikia"""
+        try:
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            
+            warnings = []
+            
+            # Tikriname same name count
+            if 0 < syrax_data.get('same_name_count', 0) < 500:
+                warnings.append(f"🔍 Same name count: {syrax_data['same_name_count']}")
+                
+            # Tikriname same website count
+            if 0 < syrax_data.get('same_website_count', 0) < 500:
+                warnings.append(f"🌐 Same website count: {syrax_data['same_website_count']}")
+                
+            # Tikriname same telegram count
+            if 0 < syrax_data.get('same_telegram_count', 0) < 500:
+                warnings.append(f"📱 Same telegram count: {syrax_data['same_telegram_count']}")
+                
+            # Tikriname same twitter count
+            if 0 < syrax_data.get('same_twitter_count', 0) < 500:
+                warnings.append(f"🐦 Same twitter count: {syrax_data['same_twitter_count']}")
+            
+            # Jei yra įspėjimų, siunčiame į Telegram
+            if warnings:
+                message = (
+                    f"⚠️ LOW SIMILARITY DETECTED!\\n\\n"
+                    f"Token Address: <code>{token_address}</code>\\n\\n"
+                    f"Metrics:\\n"
+                    f"{chr(10).join(warnings)}\\n\\n"
+                    f"⏰ Found at: {current_time} UTC\\n"
+                    f"<i>Tap token address to copy</i>"
+                )
+                
+                await self._send_notification(message, parse_mode='HTML')
+                logger.info(f"[{current_time}] Sent similarity metrics alert for {token_address}")
+                    
+        except Exception as e:
+            logger.error(f"[{datetime.now(timezone.utc)}] Error checking Syrax metrics: {str(e)}")
+
     
 
     async def _send_notification(self, message: str, parse_mode: str = None) -> None:
@@ -2786,6 +2826,11 @@ class GemFinder:
                 return
                 
             if "New" in message or is_new_token:
+                # Surenkame Syrax duomenis prieš handle_new_token
+                syrax_data = self.parse_syrax_scanner_response(message)
+                if syrax_data:
+                    await self.check_syrax_metrics(token_address, syrax_data)
+                    
                 await self.token_handler.handle_new_token(current_data)
             else:
                 await self.token_handler.handle_token_update(token_address, current_data, is_new_token=is_new_token)
@@ -2794,7 +2839,7 @@ class GemFinder:
             
         except Exception as e:
             logger.error(f"[2025-01-31 13:08:54] Error handling message: {e}")
-
+            
     async def _handle_new_token(self, message: str):
         """Apdoroja naują token'ą"""
         try:
@@ -3429,162 +3474,114 @@ class GemFinder:
                 }
             }
 
-            # Patikriname ar yra tekstas
             if not text:
-                logger.warning(f"[2025-02-08 23:22:39] Empty text received in parse_syrax_scanner_response")
+                logger.warning(f"[2025-02-08 23:30:51] Empty text received")
                 return data
 
-            # Padalijame tekstą į eilutes ir ieškome Special Remarks sekcijos
-            lines = text.split('\n')
-            special_remarks_found = False
-            remarks_lines = []
-
+            # Išskaidome tekstą į eilutes ir pašaliname tuščias
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            
+            # Randame Special Remarks sekciją
+            start_index = -1
             for i, line in enumerate(lines):
                 if 'Special Remarks:' in line:
-                    special_remarks_found = True
-                    remarks_lines = lines[i+1:]  # Imame visas eilutes po "Special Remarks:"
+                    start_index = i
                     break
 
-            if not special_remarks_found:
-                logger.warning(f"[2025-02-08 23:22:39] No 'Special Remarks:' section found in text")
+            if start_index == -1:
+                logger.warning(f"[2025-02-08 23:30:51] No Special Remarks section found")
                 return data
 
-            # Apdorojame tik Special Remarks eilutes
-            for line in remarks_lines:
-                if not line.strip():  # Skip empty lines
-                    continue
-
+            # Apdorojame tik eilutes po Special Remarks
+            for line in lines[start_index + 1:]:
                 try:
-                    clean_line = self.clean_line(line)
-                    
-                    # Dev bought info
-                    if 'Dev bought' in line:
-                        matches = re.search(r'Dev bought ([\d,.]+[KMB]?) tokens? with ([\d.]+) SOL or ([\d.]+)% \(([\d.]+)% of curve\)', line)
-                        if matches:
-                            tokens_str = matches.group(1).replace(',', '')
-                            # Konvertuojame K/M/B į skaičius
-                            multiplier = 1
-                            if 'K' in tokens_str:
-                                multiplier = 1000
-                                tokens_str = tokens_str.replace('K', '')
-                            elif 'M' in tokens_str:
-                                multiplier = 1000000
-                                tokens_str = tokens_str.replace('M', '')
-                            elif 'B' in tokens_str:
-                                multiplier = 1000000000
-                                tokens_str = tokens_str.replace('B', '')
-                                
-                            data['dev_bought'].update({
-                                'tokens': float(tokens_str) * multiplier,
-                                'sol': float(matches.group(2)),
-                                'percentage': float(matches.group(3)),
-                                'curve_percentage': float(matches.group(4))
-                            })
-                            logger.info(f"[2025-02-08 23:22:39] Parsed dev bought info: {data['dev_bought']}")
-
                     # Dev created tokens
-                    elif 'Dev created' in line:
+                    if 'Dev created' in line:
                         match = re.search(r'Dev created (\d+)', line)
                         if match:
                             data['dev_created_tokens'] = int(match.group(1))
-                            logger.info(f"[2025-02-08 23:22:39] Parsed dev created tokens: {data['dev_created_tokens']}")
+                            logger.debug(f"[2025-02-08 23:30:51] Found dev_created_tokens: {data['dev_created_tokens']}")
 
                     # Same name count
                     elif 'name is the same' in line:
                         match = re.search(r'same as (\d+)', line)
                         if match:
                             data['same_name_count'] = int(match.group(1))
-                            logger.info(f"[2025-02-08 23:22:39] Parsed same name count: {data['same_name_count']}")
+                            logger.debug(f"[2025-02-08 23:30:51] Found same_name_count: {data['same_name_count']}")
 
                     # Same website count
                     elif 'website is the same' in line:
                         match = re.search(r'same as (\d+)', line)
                         if match:
                             data['same_website_count'] = int(match.group(1))
-                            logger.info(f"[2025-02-08 23:22:39] Parsed same website count: {data['same_website_count']}")
+                            logger.debug(f"[2025-02-08 23:30:51] Found same_website_count: {data['same_website_count']}")
 
                     # Same telegram count
                     elif 'telegram is the same' in line:
                         match = re.search(r'same as (\d+)', line)
                         if match:
                             data['same_telegram_count'] = int(match.group(1))
-                            logger.info(f"[2025-02-08 23:22:39] Parsed same telegram count: {data['same_telegram_count']}")
+                            logger.debug(f"[2025-02-08 23:30:51] Found same_telegram_count: {data['same_telegram_count']}")
 
                     # Same twitter count
                     elif 'twitter is the same' in line:
                         match = re.search(r'same as (\d+)', line)
                         if match:
                             data['same_twitter_count'] = int(match.group(1))
-                            logger.info(f"[2025-02-08 23:22:39] Parsed same twitter count: {data['same_twitter_count']}")
+                            logger.debug(f"[2025-02-08 23:30:51] Found same_twitter_count: {data['same_twitter_count']}")
+
+                    # Dev bought tokens
+                    elif 'Dev bought' in line:
+                        try:
+                            matches = re.search(r'Dev bought ([\d,.]+[KMB]?) tokens? with ([\d.]+) SOL or ([\d.]+)% \(([\d.]+)% of curve\)', line)
+                            if matches:
+                                tokens_str = matches.group(1).replace(',', '')
+                                multiplier = 1
+                                if 'K' in tokens_str:
+                                    multiplier = 1000
+                                    tokens_str = tokens_str.replace('K', '')
+                                elif 'M' in tokens_str:
+                                    multiplier = 1000000
+                                    tokens_str = tokens_str.replace('M', '')
+                                elif 'B' in tokens_str:
+                                    multiplier = 1000000000
+                                    tokens_str = tokens_str.replace('B', '')
+
+                                data['dev_bought'].update({
+                                    'tokens': float(tokens_str) * multiplier,
+                                    'sol': float(matches.group(2)),
+                                    'percentage': float(matches.group(3)),
+                                    'curve_percentage': float(matches.group(4))
+                                })
+                        except Exception as e:
+                            logger.warning(f"[2025-02-08 23:30:51] Error parsing dev bought info: {e}")
 
                     # Bundle info
-                    elif 'notable bundle(s) detected' in line:
-                        matches = re.search(r'(\d+) notable bundle.*?, ([\d.]+)% of supply \(([\d.]+)% of curve\) with ([\d.]+) SOL', line)
-                        if matches:
-                            data['bundle'].update({
-                                'count': int(matches.group(1)),
-                                'supply_percentage': float(matches.group(2)),
-                                'curve_percentage': float(matches.group(3)),
-                                'sol': float(matches.group(4))
-                            })
-                            logger.info(f"[2025-02-08 23:22:39] Parsed bundle info: {data['bundle']}")
+                    elif 'bundle(s) detected' in line:
+                        try:
+                            matches = re.search(r'(\d+) notable bundle.*?, ([\d.]+)% of supply \(([\d.]+)% of curve\) with ([\d.]+) SOL', line)
+                            if matches:
+                                data['bundle'].update({
+                                    'count': int(matches.group(1)),
+                                    'supply_percentage': float(matches.group(2)),
+                                    'curve_percentage': float(matches.group(3)),
+                                    'sol': float(matches.group(4))
+                                })
+                        except Exception as e:
+                            logger.warning(f"[2025-02-08 23:30:51] Error parsing bundle info: {e}")
 
                 except Exception as e:
-                    logger.warning(f"[2025-02-08 23:22:39] Error parsing line '{line}': {str(e)}")
+                    logger.warning(f"[2025-02-08 23:30:51] Error parsing line '{line}': {e}")
                     continue
 
+            logger.info(f"[2025-02-08 23:30:51] Successfully parsed Syrax data: {data}")
             return data
 
         except Exception as e:
-            logger.error(f"[2025-02-08 23:22:39] Error in parse_syrax_scanner_response: {str(e)}")
+            logger.error(f"[2025-02-08 23:30:51] Main parsing error: {e}")
             return data
 
-    async def check_syrax_metrics(self, token_address: str, syrax_data: Dict) -> None:
-        """Tikrina Syrax Scanner metrikas ir siunčia įspėjimus jei reikia"""
-        try:
-            current_time = datetime.utcnow()
-            formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
-            
-            warnings = []
-            
-            # Tikriname same name count
-            if 0 < syrax_data.get('same_name_count', 0) < 500:
-                warnings.append(f"🔍 Same name count: {syrax_data['same_name_count']}")
-                
-            # Tikriname same website count
-            if 0 < syrax_data.get('same_website_count', 0) < 500:
-                warnings.append(f"🌐 Same website count: {syrax_data['same_website_count']}")
-                
-            # Tikriname same telegram count
-            if 0 < syrax_data.get('same_telegram_count', 0) < 500:
-                warnings.append(f"📱 Same telegram count: {syrax_data['same_telegram_count']}")
-                
-            # Tikriname same twitter count
-            if 0 < syrax_data.get('same_twitter_count', 0) < 500:
-                warnings.append(f"🐦 Same twitter count: {syrax_data['same_twitter_count']}")
-            
-            # Jei yra įspėjimų, siunčiame į Telegram
-            if warnings:
-                message = (
-                    f"⚠️ **Low Similarity Alert**\n\n"
-                    f"**Token:** `{token_address}`\n\n"
-                    f"**Metrics:**\n{chr(10).join(warnings)}\n\n"
-                    f"**Time:** `{formatted_time}`\n\n"
-                    f"💡 _Low similarity counts might indicate a new legitimate project_"
-                )
-                
-                # Siunčiame žinutę per token handler
-                if self.token_handler and self.token_handler.telegram_client:
-                    await self.token_handler.telegram_client.send_message(
-                        Config.TELEGRAM_ALERT_GROUP,
-                        message,
-                        parse_mode='markdown'
-                    )
-                    logger.info(f"[{formatted_time}] Sent similarity metrics alert for {token_address}")
-                
-        except Exception as e:
-            logger.error(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Error checking Syrax metrics: {str(e)}")
-
+    
 if __name__ == "__main__":
     try:
         gem_finder = GemFinder()
