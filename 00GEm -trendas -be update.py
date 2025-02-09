@@ -351,16 +351,16 @@ class TokenMetrics:
     total_scans: int = 0      # Vietoj bool = False
 
     # Nauji laukai iš Syrax Scanner
-    dev_bought_tokens: float = 0.0,
-    dev_bought_sol: float = 0.0,
-    dev_created_tokens: int = 0,
-    same_name_count: int = 0,
-    same_website_count: int = 0,
-    same_telegram_count: int = 0,
-    same_twitter_count: int = 0,
-    bundle_count: int = 0,
-    bundle_supply_percentage: float = 0.0,
-    bundle_curve_percentage: float = 0.0,
+    dev_bought_tokens: float = 0.0
+    dev_bought_sol: float = 0.0
+    dev_created_tokens: int = 0
+    same_name_count: int = 0
+    same_website_count: int = 0
+    same_telegram_count: int = 0
+    same_twitter_count: int = 0
+    bundle_count: int = 0
+    bundle_supply_percentage: float = 0.0
+    bundle_curve_percentage: float = 0.0
     bundle_sol: float = 0.0
     
     # Optional fields with default values
@@ -2305,6 +2305,60 @@ class TokenAnalytics:
                 'price_change': gem.price_change_24h
             })
         return market_metrics
+    
+    async def _analyze_community_metrics(self, gems):
+        """Analizuoja bendruomenės metrikas"""
+        community_metrics = []
+        for gem in gems:
+            community_metrics.append({
+                'holders_count': gem.holders_count,
+                'holder_growth': self._calculate_holder_growth_rate(gem),
+                'social_activity': self._calculate_social_activity(gem)
+            })
+        return community_metrics
+
+    async def _analyze_dev_metrics(self, gems):
+        """Analizuoja dev metrikas"""
+        return {
+            'avg_dev_sol': sum(g.dev_sol_balance for g in gems) / len(gems),
+            'avg_dev_tokens': sum(g.dev_token_percentage for g in gems) / len(gems),
+            'renounced_ratio': sum(1 for g in gems if g.owner_renounced) / len(gems)
+        }
+
+    def _calculate_holder_growth_rate(self, gem):
+        """Skaičiuoja holder'ių augimo greitį"""
+        try:
+            age_hours = self._convert_age_to_hours(gem.age)
+            if age_hours > 0:
+                return gem.holders_count / age_hours
+            return 0.0
+        except:
+            return 0.0
+
+    def _calculate_social_activity(self, gem):
+        """Skaičiuoja socialinį aktyvumą"""
+        score = 0.0
+        if gem.telegram_url:
+            score += 0.4
+        if gem.twitter_url:
+            score += 0.4
+        if gem.website_url:
+            score += 0.2
+        return score
+        
+    def _convert_age_to_hours(self, age: str) -> float:
+        """Konvertuoja amžių į valandas"""
+        try:
+            number = int(''.join(filter(str.isdigit, age)))
+            if 'm' in age:
+                return number / 60  # minutės į valandas
+            elif 'h' in age:
+                return number  # jau valandos
+            elif 'd' in age:
+                return number * 24  # dienos į valandas
+            return 0
+        except:
+            return 0
 
     async def _analyze_security_metrics(self, gems):
         """Analizuoja saugumo metrikas"""
@@ -3042,6 +3096,10 @@ class GemFinder:
             self.db_manager = DatabaseManager()
             await self.db_manager.setup_database()
             logger.info(f"[2025-02-03 17:21:25] Database initialized")
+
+            # Pridėti:
+            self.syrax = SyraxAnalyzer(self.db_manager, self.ml_analyzer)
+            logger.info(f"[2025-02-09 14:40:36] SyraxAnalyzer initialized")
             
             # Tada kuriame kitus komponentus
             self.token_analyzer = TokenAnalyzer(self.db_manager, None)
