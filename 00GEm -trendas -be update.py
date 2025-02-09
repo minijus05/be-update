@@ -7,9 +7,10 @@ from datetime import datetime, timezone, timedelta
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import IsolationForest
 
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from telethon import TelegramClient, events
 import logging
 logger = logging.getLogger(__name__)
@@ -771,6 +772,10 @@ class TokenHandler:
         self.ml = ml_analyzer
         self.telegram_client = None
         self.syrax = SyraxAnalyzer(db_manager, ml_analyzer)
+        self.similarity_model = IsolationForest(
+            contamination=0.1,
+            random_state=42
+        )
         
     async def handle_new_token(self, token_data: TokenMetrics):
         """Apdoroja naują token'ą"""
@@ -946,6 +951,43 @@ class TokenHandler:
             logger.error(f"[2025-02-03 14:44:23] Error in check_inactive_tokens: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+    async def analyze_token_similarity(self, token_address: str) -> Tuple[bool, float]:
+        """Analizuoja ar token'as yra panašus į žinomus scam'us"""
+        try:
+            current_data = await self.db.get_initial_state(token_address)
+            if not current_data:
+                return False, 0.0
+
+            features = np.array([
+                current_data.same_name_count,
+                current_data.same_website_count,
+                current_data.same_telegram_count,
+                current_data.same_twitter_count,
+                current_data.bundle_count,
+                current_data.bundle_supply_percentage,
+                current_data.bundle_curve_percentage,
+                current_data.bundle_sol,
+                current_data.dev_bought_tokens,
+                current_data.dev_bought_sol,
+                current_data.dev_created_tokens,
+                current_data.sniper_activity_tokens,
+                current_data.sniper_activity_percentage
+            ]).reshape(1, -1)
+
+            prediction = self.similarity_model.predict(features)[0]
+            score = self.similarity_model.score_samples(features)[0]
+            
+            normalized_score = 1 / (1 + np.exp(-score))
+            is_similar = prediction == -1  # -1 reiškia anomaliją
+
+            return is_similar, normalized_score
+
+        except Exception as e:
+            logger.error(f"[{datetime.now(timezone.utc)}] Error analyzing token similarity: {e}")
+            return False, 0.0
+
+    
 
 class MLAnalyzer:
     def __init__(self, db_manager, token_analyzer=None):
