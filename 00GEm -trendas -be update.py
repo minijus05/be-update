@@ -963,6 +963,23 @@ class MLAnalyzer:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
 
+    async def get_similarity_thresholds(self) -> Dict:
+        """Grąžina ML nustatytas similarity ribas"""
+        try:
+            # Gaunamos ribos iš ML modelio
+            threshold_data = await self.db.get_latest_token_update(None)  # Tam tikrų statistikų gavimas
+            
+            thresholds = {
+                'name': max(5, threshold_data.get('avg_name_similarity', 5)),
+                'website': max(3, threshold_data.get('avg_website_similarity', 3)),
+                'social': max(8, threshold_data.get('avg_social_similarity', 8))
+            }
+            logger.info(f"[2025-02-09 14:26:02] ML similarity thresholds updated: {thresholds}")
+            return thresholds
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:26:02] Error getting similarity thresholds: {e}")
+            return {'name': 5, 'website': 3, 'social': 8}  # Safe defaults
+
     async def predict_potential(self, token_data: TokenMetrics) -> float:
         """Prognozuoja token'o potencialą tapti gemu"""
         try:
@@ -1528,7 +1545,117 @@ async def analyze_feature_correlations(self):
         logger.error(f"[2025-02-03 12:46:07] Error analyzing feature correlations: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        
+
+class SyraxAnalyzer:
+    def __init__(self, db_manager, ml_analyzer):
+        self.db = db_manager
+        self.ml = ml_analyzer
+        self.logger = logger
+        self.similarity_thresholds = None
+
+    async def analyze_metrics(self, token_address: str, syrax_data: Dict) -> Dict:
+        """Analizuoja Syrax metrikas, pradedant nuo similarity"""
+        try:
+            # Pirma analizuojame similarity
+            similarity_risk = await self._analyze_similarity_metrics(syrax_data)
+            
+            # Jei similarity rizika žema, tik tada tikriname kitas metrikas
+            if similarity_risk < 0.7:  # Ribą nustato ML mokymosi metu
+                bundle_risk = self._analyze_bundle_metrics(syrax_data)
+                dev_risk = self._analyze_dev_metrics(syrax_data)
+            else:
+                # Jei similarity jau rodo riziką, kitos metrikos mažiau svarbios
+                bundle_risk = 0.0
+                dev_risk = 0.0
+            
+            risk_assessment = {
+                'timestamp': datetime.now(timezone.utc),
+                'address': token_address,
+                'risk_scores': {
+                    'similarity_risk': similarity_risk,
+                    'bundle_risk': bundle_risk,
+                    'dev_risk': dev_risk
+                },
+                'similar_projects': {
+                    'name_count': syrax_data['same_name_count'],
+                    'website_count': syrax_data['same_website_count'],
+                    'telegram_count': syrax_data['same_telegram_count'],
+                    'twitter_count': syrax_data['same_twitter_count']
+                },
+                'is_high_risk': similarity_risk >= 0.7
+            }
+            
+            logger.info(f"[2025-02-09 14:33:11] Risk assessment completed for {token_address}")
+            logger.info(f"[2025-02-09 14:33:11] Similarity risk score: {similarity_risk:.2f}")
+            
+            return risk_assessment
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:33:11] Error analyzing Syrax metrics: {e}")
+            return None
+
+    async def _analyze_similarity_metrics(self, data: Dict) -> float:
+        """Analizuoja similarity metrikas pagal ML nustatytas ribas"""
+        try:
+            # Jei neturime ML nustatytų ribų, gauname jas
+            if not self.similarity_thresholds:
+                self.similarity_thresholds = await self.ml.get_similarity_thresholds()
+            
+            # Normalizuojame kiekvieną similarity metriką pagal ML ribas
+            name_risk = data['same_name_count'] / self.similarity_thresholds['name']
+            website_risk = data['same_website_count'] / self.similarity_thresholds['website']
+            social_risk = (data['same_telegram_count'] + data['same_twitter_count']) / self.similarity_thresholds['social']
+            
+            # Skaičiuojame bendrą similarity riziką
+            risk_score = max(name_risk, website_risk, social_risk)
+            
+            # Loginame similarity detales
+            logger.info(f"[2025-02-09 14:33:11] Similarity analysis:")
+            logger.info(f"[2025-02-09 14:33:11] Name risk: {name_risk:.2f}")
+            logger.info(f"[2025-02-09 14:33:11] Website risk: {website_risk:.2f}")
+            logger.info(f"[2025-02-09 14:33:11] Social risk: {social_risk:.2f}")
+            
+            return risk_score
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:33:11] Error in similarity analysis: {e}")
+            return 1.0
+
+    def _analyze_bundle_metrics(self, data: Dict) -> float:
+        """Analizuoja bundle metrikas tik jei similarity rizika žema"""
+        try:
+            # Bundle metrikų analizė dabar yra antrinė
+            bundle_risk = min(
+                data['bundle']['supply_percentage'] / 100.0,  # Normalizuojame į [0,1]
+                data['bundle']['curve_percentage'] / 100.0
+            )
+            return bundle_risk
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:33:11] Error analyzing bundle metrics: {e}")
+            return 0.0
+
+    def _analyze_dev_metrics(self, data: Dict) -> float:
+        """Analizuoja dev metrikas tik jei similarity rizika žema"""
+        try:
+            # Dev metrikų analizė taip pat antrinė
+            dev_risk = max(
+                data['dev_bought']['percentage'] / 100.0,
+                min(data['dev_created_tokens'] / 10.0, 1.0)  # Normalizuojame, max 10 tokenų
+            )
+            return dev_risk
+            
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:33:11] Error analyzing dev metrics: {e}")
+            return 0.0
+
+    async def update_similarity_thresholds(self):
+        """Atnaujina similarity ribas iš ML modelio"""
+        try:
+            self.similarity_thresholds = await self.ml.get_similarity_thresholds()
+            logger.info(f"[2025-02-09 14:33:11] Updated similarity thresholds from ML")
+        except Exception as e:
+            logger.error(f"[2025-02-09 14:33:11] Error updating similarity thresholds: {e}")        
     
 
 class DatabaseManager:
