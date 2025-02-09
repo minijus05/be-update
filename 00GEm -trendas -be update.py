@@ -559,7 +559,7 @@ class TokenHandler:
         """Tikrina Syrax Scanner metrikas ir siunčia įspėjimus jei reikia"""
         try:
             if not self.telegram_client:
-                logger.error(f"[2025-02-09 00:33:38] Telegram client not initialized")
+                logger.error(f"[2025-02-09 10:49:01] Telegram client not initialized")
                 return
             gmgn_url = f"https://gmgn.ai/sol/token/{token_address}"
 
@@ -568,37 +568,69 @@ class TokenHandler:
             website_count = int(syrax_data.get('same_website_count', 0))
             telegram_count = int(syrax_data.get('same_telegram_count', 0))
             twitter_count = int(syrax_data.get('same_twitter_count', 0))
+            dev_tokens = int(syrax_data.get('dev_created_tokens', 0))
             
-            logger.debug(f"[2025-02-09 01:33:02] Metrics - name: {name_count}, website: {website_count}, telegram: {telegram_count}, twitter: {twitter_count}")
+            # Bundle info
+            bundle_count = int(syrax_data.get('bundle', {}).get('count', 0))
+            bundle_supply = float(syrax_data.get('bundle', {}).get('supply_percentage', 0))
+            bundle_curve = float(syrax_data.get('bundle', {}).get('curve_percentage', 0))
+            bundle_sol = float(syrax_data.get('bundle', {}).get('sol', 0))
             
-            # Tikriname ar VISOS metrikos viršija savo limitus
-            if (name_count < 5 and
-                website_count < 50 and
-                telegram_count < 50 and
-                twitter_count < 50):
+            # Dev bought info
+            dev_bought_tokens = float(syrax_data.get('dev_bought', {}).get('tokens', 0))
+            dev_bought_sol = float(syrax_data.get('dev_bought', {}).get('percentage', 0))
+            dev_bought_percentage = float(syrax_data.get('dev_bought', {}).get('percentage', 0))
+            dev_bought_curve = float(syrax_data.get('dev_bought', {}).get('curve_percentage', 0))
+            
+            logger.debug(f"[2025-02-09 10:49:01] All metrics - name: {name_count}, website: {website_count}, telegram: {telegram_count}, twitter: {twitter_count}, dev_tokens: {dev_tokens}, bundle: {bundle_count}/{bundle_supply}%/{bundle_curve}%/{bundle_sol}SOL, dev_bought: {dev_bought_tokens}/{dev_bought_sol}/{dev_bought_percentage}%/{dev_bought_curve}%")
+            
+            warnings = []
+            
+            # Tikriname ar metrikos yra mažesnės už limitą
+            if name_count < 500:
+                warnings.append(f"🔍 Same name count: {name_count}")
+            if website_count < 500:
+                warnings.append(f"🌐 Same website count: {website_count}")
+            if telegram_count < 500:
+                warnings.append(f"📱 Same telegram count: {telegram_count}")
+            if twitter_count < 500:
+                warnings.append(f"🐦 Same twitter count: {twitter_count}")
                 
-                warnings = [
-                    f"🔍 Same name count: {name_count}",
-                    f"🌐 Same website count: {website_count}",
-                    f"📱 Same telegram count: {telegram_count}",
-                    f"🐦 Same twitter count: {twitter_count}"
-                ]
+            # Dev created tokens
+            if dev_tokens > 0:
+                warnings.append(f"👨‍💻 Dev created tokens: {dev_tokens}")
                 
+            # Bundle warnings
+            if bundle_count > 0:
+                warnings.append(f"📦 Bundle detected: {bundle_count} bundles")
+                warnings.append(f"💹 Bundle supply: {bundle_supply}%")
+                warnings.append(f"📊 Bundle curve: {bundle_curve}%")
+                warnings.append(f"💰 Bundle SOL: {bundle_sol} SOL")
+                
+            # Dev bought warnings
+            if dev_bought_tokens > 0:
+                warnings.append(f"👨‍💻 Dev bought tokens: {dev_bought_tokens}")
+                warnings.append(f"💰 Dev bought SOL: {dev_bought_sol}")
+                warnings.append(f"📊 Dev bought percentage: {dev_bought_percentage}%")
+                warnings.append(f"📈 Dev bought curve: {dev_bought_curve}%")
+            
+            # Jei yra įspėjimų, siunčiame žinutę
+            if warnings:
                 message = (
-                    f"⚠️ HIGH SIMILARITY DETECTED!\n\n"
-                    f"Token Address: <code>{token_address}</code>\n\n"
-                    f"Links:\n"
-                    f"🔗 <a href='{gmgn_url}'>View on GMGN.AI</a>\n"
-                    f"Metrics:\n"
-                    f"{chr(10).join(warnings)}\n\n"
+                    f"⚠️ METRICS ALERT!\\n\\n"
+                    f"Token Address: <code>{token_address}</code>\\n\\n"
+                    f"Links:\\n"
+                    f"🔗 <a href='{gmgn_url}'>View on GMGN.AI</a>\\n\\n"
+                    f"Metrics:\\n"
+                    f"{chr(10).join(warnings)}\\n\\n"
                     f"<i>Tap token address to copy</i>"
                 )
                 
                 await self._send_notification(message, parse_mode='HTML')
-                logger.info(f"[2025-02-09 00:33:38] Sent similarity metrics alert for {token_address}")
+                logger.info(f"[2025-02-09 10:49:01] Sent metrics alert for {token_address}")
                     
         except Exception as e:
-            logger.error(f"[2025-02-09 00:33:38] Error checking Syrax metrics: {str(e)}")
+            logger.error(f"[2025-02-09 10:49:01] Error checking Syrax metrics: {str(e)}")
 
    
 
@@ -3092,7 +3124,8 @@ class GemFinder:
         """
         
         
-        important_emoji = ['💠', '🤍', '✅', '❌', '🔻', '🐟', '🍤', '🐳', '🌱', '🕒', '📈', '⚡️', '👥', '🔗', '🦅', '🔫', '⚠️', '🛠', '🔝', '🔥', '💧']
+        important_emoji = ['💠', '🤍', '✅', '❌', '🔻', '🐟', '🍤', '🐳', '🌱', '🕒', '📈', '⚡️', '👥', '🔗', '🦅', '🔫', '⚠️', '🛠', '🔝', '🔥', '💧', '😳', '🤔', '🚩', '📦', '🎯',
+            '👍', '💰', '💼']
         
         # Pašalinam Markdown ir URL
         cleaned = re.sub(r'\*\*|\[.*?\]|\(https?://[^)]+\)', '', text)
@@ -3486,54 +3519,119 @@ class GemFinder:
             }
 
             if not text:
-                logger.warning(f"[2025-02-09 00:14:03] Empty text received")
+                logger.warning(f"[2025-02-09 10:37:11] Empty text received")
                 return data
                 
             lines = text.split('\n')
             
             for line in lines:
                 try:
+                    clean_line = self.clean_line(line)
+                    
+                    # Dev bought info
+                    if 'Dev bought' in clean_line:
+                        tokens_match = re.search(r'(\d+\.?\d*)([KMB]) tokens', clean_line)
+                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                        percentage_match = re.search(r'(\d+\.?\d*)%', clean_line)
+                        curve_match = re.search(r'(\d+\.?\d*)% of curve', clean_line)
+                        
+                        if tokens_match:
+                            value = float(tokens_match.group(1))
+                            multiplier = {'K': 1000, 'M': 1000000, 'B': 1000000000}[tokens_match.group(2)]
+                            data['dev_bought']['tokens'] = value * multiplier
+                        if sol_match:
+                            data['dev_bought']['sol'] = float(sol_match.group(1))
+                        if percentage_match:
+                            data['dev_bought']['percentage'] = float(percentage_match.group(1))
+                        if curve_match:
+                            data['dev_bought']['curve_percentage'] = float(curve_match.group(1))
+                    
+                    # Bundle info (🚩 Bundled!)
+                    if '🚩' in clean_line and 'Bundled' in clean_line:
+                        count_match = re.search(r'(\d+) trades', clean_line)
+                        supply_match = re.search(r'(\d+\.?\d*)%', clean_line)
+                        curve_match = re.search(r'\((\d+\.?\d*)% of curve\)', clean_line)
+                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                        
+                        if count_match:
+                            data['bundle']['count'] = int(count_match.group(1))
+                        if supply_match:
+                            data['bundle']['supply_percentage'] = float(supply_match.group(1))
+                        if curve_match:
+                            data['bundle']['curve_percentage'] = float(curve_match.group(1))
+                        if sol_match:
+                            data['bundle']['sol'] = float(sol_match.group(1))
+
+                    # Notable bundle info (📦 notable bundle(s))
+                    elif '📦' in clean_line and 'notable bundle' in clean_line:
+                        count_match = re.search(r'(\d+) notable', clean_line)
+                        supply_match = re.search(r'(\d+\.?\d*)% of supply', clean_line)
+                        curve_match = re.search(r'\((\d+\.?\d*)% of curve\)', clean_line)
+                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                        
+                        if count_match:
+                            data['bundle']['count'] = int(count_match.group(1))
+                        if supply_match:
+                            data['bundle']['supply_percentage'] = float(supply_match.group(1))
+                        if curve_match:
+                            data['bundle']['curve_percentage'] = float(curve_match.group(1))
+                        if sol_match:
+                            data['bundle']['sol'] = float(sol_match.group(1))
+                    
+                                       
+                    # Sniper activity
+                    elif '🎯' in clean_line and 'Notable sniper activity' in clean_line:
+                        tokens_match = re.search(r'(\d+\.?\d*)([KMB]) \((\d+\.?\d*)%\) tokens', clean_line)
+                        sol_match = re.search(r'(\d+\.?\d*) SOL', clean_line)
+                        
+                        if tokens_match:
+                            value = float(tokens_match.group(1))
+                            multiplier = {'K': 1000, 'M': 1000000, 'B': 1000000000}[tokens_match.group(2)]
+                            data['sniper_activity']['tokens'] = value * multiplier
+                            data['sniper_activity']['percentage'] = float(tokens_match.group(3))
+                        if sol_match:
+                            data['sniper_activity']['sol'] = float(sol_match.group(1))
+                    
                     # Dev created tokens
-                    if 'Dev created' in line:
-                        match = re.search(r'Dev created (\d+)', line)
+                    elif 'Dev created' in clean_line:
+                        match = re.search(r'Dev created (\d+)', clean_line)
                         if match:
                             data['dev_created_tokens'] = int(match.group(1))
                     
                     # Same name count
-                    elif 'same as' in line and 'name' in line.lower():
-                        match = re.search(r'same as (\d+)', line)
+                    elif 'same as' in clean_line and 'name' in clean_line.lower():
+                        match = re.search(r'same as (\d+)', clean_line)
                         if match:
                             data['same_name_count'] = int(match.group(1))
                     
                     # Same website count
-                    elif 'same as' in line and 'website' in line.lower():
-                        match = re.search(r'same as (\d+)', line)
+                    elif 'same as' in clean_line and 'website' in clean_line.lower():
+                        match = re.search(r'same as (\d+)', clean_line)
                         if match:
                             data['same_website_count'] = int(match.group(1))
                     
                     # Same telegram count
-                    elif 'same as' in line and 'telegram' in line.lower():
-                        match = re.search(r'same as (\d+)', line)
+                    elif 'same as' in clean_line and 'telegram' in clean_line.lower():
+                        match = re.search(r'same as (\d+)', clean_line)
                         if match:
                             data['same_telegram_count'] = int(match.group(1))
                     
                     # Same twitter count
-                    elif 'same as' in line and 'twitter' in line.lower():
-                        match = re.search(r'same as (\d+)', line)
+                    elif 'same as' in clean_line and 'twitter' in clean_line.lower():
+                        match = re.search(r'same as (\d+)', clean_line)
                         if match:
                             data['same_twitter_count'] = int(match.group(1))
                     
                 except Exception as e:
-                    logger.warning(f"[2025-02-09 00:14:03] Error parsing line '{line}': {str(e)}")
+                    logger.warning(f"[2025-02-09 10:37:11] Error parsing line '{line}': {str(e)}")
                     continue
 
-            logger.info(f"[2025-02-09 00:14:03] Successfully parsed Syrax data: {data}")
+            logger.info(f"[2025-02-09 10:37:11] Successfully parsed Syrax data: {data}")
             return data
 
         except Exception as e:
-            logger.error(f"[2025-02-09 00:14:03] Main parsing error: {e}")
+            logger.error(f"[2025-02-09 10:37:11] Main parsing error: {e}")
             return data
-
         
 if __name__ == "__main__":
     try:
