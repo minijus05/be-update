@@ -133,6 +133,14 @@ class TokenMonitor:
             
             if token_addresses:
                 for address in token_addresses:
+                    # Patikriname ar token'as jau yra DB ir ar jis nepažymėtas kaip no_recheck
+                    self.db.cursor.execute("SELECT address, total_scans, no_recheck FROM tokens WHERE address = ?", (address,))
+                    token_record = self.db.cursor.fetchone()
+                    token_exists = token_record is not None
+
+                    if token_exists and token_record[2] == 1:  # Jei no_recheck = 1
+                        print(f"\n[SKIPPED] Token already analyzed and alerted: {address}")
+                        continue
                     is_new_token = "new" in message.lower() or "ALERT" in message or "Descriptionasas" in message
                     is_from_token = "from" in message.lower() or "MADE" in message or "🔝" in message
                     
@@ -152,51 +160,48 @@ class TokenMonitor:
                             # Padidiname skenavimų skaičių
                             self.db.cursor.execute("""
                                 UPDATE tokens 
-                                SET total_scans = ? 
+                                SET total_scans = ?,
+                                    last_updated = CURRENT_TIMESTAMP
                                 WHERE address = ?
                             """, (current_scans + 1, address))
+                            self.db.conn.commit()
                             
                             print(f"\n[RESCANNING] Token exists in database (scan #{current_scans + 1}): {address}")
+                        else:
+                            # Naujo tokeno logika
+                            print(f"\n[NEW TOKEN DETECTED] Address: {address}")
                             
-                            # Siunčiame į scanner grupę
-                            original_message = await self.scanner_client.send_message(
-                                Config.SCANNER_GROUP,
-                                address
+                        # Siunčiame į scanner grupę
+                        original_message = await self.scanner_client.send_message(
+                            Config.SCANNER_GROUP,
+                            address
+                        )
+                        logger.info(f"Sent token {'RESCAN' if token_exists else 'NEW'} to scanner group: {address}")
+
+                        # Siunčiame į @solsnifferbot su /scan prefiksu
+                        try:
+                            await self.scanner_client.send_message(
+                                '@solsnifferbot',
+                                f'/scan {address}'
                             )
-                            logger.info(f"Sent token RESCAN to scanner group: {address}")
-
-                            # Siunčiame į @solsnifferbot su /scan prefiksu
-                            try:
-                                await self.scanner_client.send_message(
-                                    '@solsnifferbot',
-                                    f'/scan {address}'
-                                )
-                                logger.info(f"Sent scan request to solsnifferbot: {address}")
-                            except Exception as e:
-                                logger.error(f"Failed to send message to solsnifferbot: {e}")
-                                
-                            # Renkame scannerių duomenis
-                            scanner_data = await self._collect_scanner_data(address, original_message)
+                            logger.info(f"Sent scan request to solsnifferbot: {address}")
+                        except Exception as e:
+                            logger.error(f"Failed to send message to solsnifferbot: {e}")
                             
-                            if scanner_data:
-                                try:
-                                    self.db.cursor.execute("""
-                                        UPDATE tokens 
-                                        SET soul_data = ?,
-                                            syrax_data = ?,
-                                            proficy_data = ?
-                                        WHERE address = ?
-                                    """, (
-                                        json.dumps(scanner_data['soul']),
-                                        json.dumps(scanner_data['syrax']),
-                                        json.dumps(scanner_data['proficy']),
-                                        address
-                                    ))
-                                except Exception as e:
-                                    logger.error(f"Error updating token data: {e}")
-                            continue
-
-                           # Analizuojame naują tokeną
+                        # Renkame scannerių duomenis
+                        scanner_data = await self._collect_scanner_data(address, original_message)
+                        
+                        if scanner_data:
+                            # Išsaugome token duomenis į DB
+                            self.db.save_token_data(
+                                address,
+                                scanner_data['soul'],
+                                scanner_data['syrax'],
+                                scanner_data['proficy'],
+                                is_new_token=not token_exists
+                            )
+                            
+                            # Analizuojame tokeną
                             analysis_result = self.gem_analyzer.analyze_token(scanner_data)
                             
                             if analysis_result['status'] == 'pending':
@@ -204,16 +209,10 @@ class TokenMonitor:
                             else:
                                 await self._handle_analysis_results(analysis_result, scanner_data)
                             
-                            
-                            # Pažymime, kad šio tokeno nebereikia tikrinti
-                            self.db.cursor.execute('''
-                                UPDATE tokens 
-                                SET no_recheck = 0
-                                WHERE address = ?
-                            ''', (address,))
-                            self.db.conn.commit()
-    
-                            print(f"[SUCCESS] Saved NEW token data: {address}")
+                            if not token_exists:
+                                print(f"[SUCCESS] Saved NEW token data: {address}")
+                            else:
+                                print(f"[SUCCESS] Updated existing token data (scan #{current_scans + 1}): {address}")
 
                                                         
                     elif is_from_token:
@@ -636,6 +635,19 @@ class TokenMonitor:
 
         
         TokenAnalysis"""
+
+            # Čia pridedame - pažymėti, kad daugiau netikrinti šio tokeno
+
+        # Čia pridedame - pažymėti, kad daugiau netikrinti šio tokeno
+            if token_address and token_address != 'Unknown':
+                self.db.cursor.execute("""
+                    UPDATE tokens 
+                    SET no_recheck = 1,
+                        last_updated = CURRENT_TIMESTAMP
+                    WHERE address = ?
+                """, (token_address,))
+                self.db.conn.commit()
+                logger.info(f"Token {token_address} marked as no_recheck after analysis")
 
             return message
 
@@ -1351,7 +1363,7 @@ class MLIntervalAnalyzer:
                     'mint_status': False,
                     'freeze_status': False,
                     'lp_status': False,
-                    'total_scans': False,
+                    'total_scans': True,
                     'volume_1h': False,
                     'price_change_1h': False,
                     'bs_ratio_1h': False,
@@ -1382,10 +1394,10 @@ class MLIntervalAnalyzer:
             'price_change_1h': (-50, 1000),      # xxxxxxxxxxxxxxxxx
             'market_cap': (5000, 1000000),      #  
             'volume_1h': (1000, 10000000),          #  
-            'holders_total': (100, 100000),         # xxxxxxxxxxxxx
+            'holders_total': (20, 100000),         # xxxxxxxxxxxxx
             'liquidity_usd': (0, 10000000),      #  
             'total_scans': (15, 1000000),          # 
-            'traders_count': (250, 100000),         # xxxxxxxxxxxxx
+            'traders_count': (25, 100000),         # xxxxxxxxxxxxx
             'bundle_count': (0, 0),               # 
             'mint_status': (0, 0),                # 
             'freeze_status': (0, 0),              # 
