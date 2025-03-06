@@ -29,7 +29,7 @@ class Config:
     # Telegram settings
     TELEGRAM_API_ID = '25425140'
     TELEGRAM_API_HASH = 'bd0054bc5393af360bc3930a27403c33'
-    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@pump2ray'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
+    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@solautobot_pumpfunalert'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
     
     TELEGRAM_GEM_CHAT = '@testasmano'
     
@@ -48,7 +48,7 @@ class Config:
     MIN_GEMS_FOR_ANALYSIS = 5  # Minimalus GEM skaičius prieš pradedant analizę
 
     # GEM settings
-    GEM_MULTIPLIER = "10x"
+    GEM_MULTIPLIER = "20x"
     MIN_GEM_SCORE = 10
 
     # Žinutes siuntimas
@@ -133,49 +133,78 @@ class TokenMonitor:
             
             if token_addresses:
                 for address in token_addresses:
-                    is_new_token = "new" in message.lower() or "migration" in message or "Description" in message
+                    is_new_token = "new" in message.lower() or "ALERT" in message or "Descriptionasas" in message
                     is_from_token = "from" in message.lower() or "MADE" in message or "🔝" in message
                     
                     # Patikriname ar token'as jau yra DB
-                    self.db.cursor.execute("SELECT address FROM tokens WHERE address = ?", (address,))
-                    token_exists = self.db.cursor.fetchone() is not None
-                    
-                    if is_new_token:
-                        # Jei token'as jau egzistuoja - praleidžiam
-                        if token_exists:
-                            print(f"\n[SKIPPED NEW] Token already exists in database: {address}")
-                            continue
-                            
-                        print(f"\n[NEW TOKEN DETECTED] Address: {address}")
-                        # Siunčiame į scanner grupę
-                        original_message = await self.scanner_client.send_message(
-                            Config.SCANNER_GROUP,
-                            address
-                        )
-                        logger.info(f"Sent NEW token to scanner group: {address}")
+                    self.db.cursor.execute("SELECT address, total_scans FROM tokens WHERE address = ?", (address,))
+                    token_record = self.db.cursor.fetchone()
+                    token_exists = token_record is not None
 
-                        # Siunčiame į @solsnifferbot su /scan prefiksu
-                        try:
-                            await self.scanner_client.send_message(
-                                '@solsnifferbot',
-                                f'/scan {address}'
+                    if is_new_token:
+                        # Jei token'as jau egzistuoja
+                        if token_exists:
+                            current_scans = token_record[1] if token_record[1] is not None else 0
+                            if current_scans >= 5:  # Maksimalus skenavimų skaičius
+                                print(f"\n[SKIPPED NEW] Token already exists in database (scanned {current_scans} times): {address}")
+                                continue
+
+                            # Padidiname skenavimų skaičių
+                            self.db.cursor.execute("""
+                                UPDATE tokens 
+                                SET total_scans = ? 
+                                WHERE address = ?
+                            """, (current_scans + 1, address))
+                            
+                            print(f"\n[RESCANNING] Token exists in database (scan #{current_scans + 1}): {address}")
+                            
+                            # Siunčiame į scanner grupę
+                            original_message = await self.scanner_client.send_message(
+                                Config.SCANNER_GROUP,
+                                address
                             )
-                            logger.info(f"Sent scan request to solsnifferbot: {address}")
-                        except Exception as e:
-                            logger.error(f"Failed to send message to solsnifferbot: {e}")
-                        
-                        # Renkame scannerių duomenis
-                        scanner_data = await self._collect_scanner_data(address, original_message)
-                        
-                        if scanner_data:
-                            # Išsaugome token duomenis į DB
-                            self.db.save_token_data(
-                                address,
-                                scanner_data['soul'],
-                                scanner_data['syrax'],
-                                scanner_data['proficy'],
-                                is_new_token=True
-                            )
+                            logger.info(f"Sent token RESCAN to scanner group: {address}")
+
+                            # Siunčiame į @solsnifferbot su /scan prefiksu
+                            try:
+                                await self.scanner_client.send_message(
+                                    '@solsnifferbot',
+                                    f'/scan {address}'
+                                )
+                                logger.info(f"Sent scan request to solsnifferbot: {address}")
+                            except Exception as e:
+                                logger.error(f"Failed to send message to solsnifferbot: {e}")
+                                
+                            # Renkame scannerių duomenis
+                            scanner_data = await self._collect_scanner_data(address, original_message)
+                            
+                            if scanner_data:
+                                try:
+                                    self.db.cursor.execute("""
+                                        UPDATE tokens 
+                                        SET soul_data = ?,
+                                            syrax_data = ?,
+                                            proficy_data = ?
+                                        WHERE address = ?
+                                    """, (
+                                        json.dumps(scanner_data['soul']),
+                                        json.dumps(scanner_data['syrax']),
+                                        json.dumps(scanner_data['proficy']),
+                                        address
+                                    ))
+                                except Exception as e:
+                                    logger.error(f"Error updating token data: {e}")
+                            continue
+
+                           # Analizuojame naują tokeną
+                            analysis_result = self.gem_analyzer.analyze_token(scanner_data)
+                            
+                            if analysis_result['status'] == 'pending':
+                                print(f"\n[ANALYSIS PENDING] {analysis_result['message']}")
+                            else:
+                                await self._handle_analysis_results(analysis_result, scanner_data)
+                            
+                            
                             # Pažymime, kad šio tokeno nebereikia tikrinti
                             self.db.cursor.execute('''
                                 UPDATE tokens 
@@ -191,24 +220,17 @@ class TokenMonitor:
                         if not token_exists:
                             print(f"\n[SKIPPED UPDATE] Token not found in database: {address}")
                             continue
-                                            # Patikriname ar token'as jau buvo rechecked
-                        self.db.cursor.execute("SELECT no_recheck FROM tokens WHERE address = ?", (address,))
-                        token_data = self.db.cursor.fetchone()
-                        
-                        if not token_data or token_data[0] != 1:
-                            print(f"\n[SKIPPED UPDATE] Token hasn't been rechecked yet: {address}")
-                            continue
-                        
-                        print(f"\n[UPDATE TOKEN DETECTED] Address: {address}")
                             
-                        
+                        print(f"\n[UPDATE TOKEN DETECTED] Address: {address}")
                         # Siunčiame į scanner grupę
                         original_message = await self.scanner_client.send_message(
                             Config.SCANNER_GROUP,
                             address
                         )
                         logger.info(f"Sent token UPDATE to scanner group: {address}")
+                            
                         
+                                                
                         # Renkame scannerių duomenis
                         scanner_data = await self._collect_scanner_data(address, original_message)
                         
@@ -363,16 +385,36 @@ class TokenMonitor:
             # Jei dar neturime visų duomenų - laukiame
             await asyncio.sleep(1)
 
-        # Jei praėjo timeout - grąžiname ką turime
-        if any(scanner_data.values()):
-            missing = [k for k, v in scanner_data.items() if v is None]
-            logger.warning(f"Timeout reached. Missing data from: {missing}")
-            
-            # Jei turime Proficy duomenis - logginame juos
+        # Jei praėjo timeout - apdorojame turimus duomenis ir užpildome trūkstamus default reikšmėmis
+        if any(len(msgs) > 0 for msgs in collected_data.values()):
+            missing = []
+            # Apdorojame turimus duomenis
+            if collected_data['soul']:
+                latest_soul = max(collected_data['soul'], key=lambda x: x['date'])
+                scanner_data["soul"] = self.parse_soul_scanner_response(latest_soul['text'])
+            else:
+                missing.append('soul')
+                scanner_data["soul"] = {'market_cap': 0, 'liquidity_usd': 0}
+                
+            if collected_data['syrax']:
+                latest_syrax = max(collected_data['syrax'], key=lambda x: x['date'])
+                scanner_data["syrax"] = self.parse_syrax_scanner_response(latest_syrax['text'])
+            else:
+                missing.append('syrax')
+                scanner_data["syrax"] = {'dev_created_tokens': 0}
+                
             if collected_data['proficy']:
                 latest_proficy = max(collected_data['proficy'], key=lambda x: x['date'])
-                logger.info(f"Last Proficy message:\n{latest_proficy['text']}")
+                scanner_data["proficy"] = await self.parse_proficy_price(latest_proficy['text'])
+                #logger.info(f"Last Proficy message:\n{latest_proficy['text']}")
+            else:
+                missing.append('proficy')
+                scanner_data["proficy"] = {
+                    '5m': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'},
+                    '1h': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'}
+                }
                 
+            logger.warning(f"Timeout reached. Missing data from: {missing}")
             return scanner_data
         
         logger.error(f"No scanner data collected for {address} after {timeout}s")
@@ -606,7 +648,7 @@ class TokenMonitor:
         """Ištraukia token adresus iš žinutės"""
         try:
             # Pirmiausiai ieškome tiesiogiai pateikto CA (Contract Address)
-            ca_match = re.search(r'(?:📃\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44})', message, re.MULTILINE)
+            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}(?:pump)?)', message, re.MULTILINE)
             if ca_match and 32 <= len(ca_match.group(1)) <= 44:
                 addr = ca_match.group(1)
                 logger.info(f"Found token address from CA: {addr}")
@@ -616,6 +658,9 @@ class TokenMonitor:
             patterns = [
                 # ==== URL PATTERNS ====
                 # Trading platformos
+                # Trading platformos
+                r'pump\.fun/([A-Za-z0-9]{32,44}pump)',  # Pump.fun URL be emoji
+                r'📈\s*Pump\.fun\s*\(https?://pump\.fun/([A-Za-z0-9]{32,44}pump)\)',
                 r'geckoterminal\.com/solana/pools/([A-Za-z0-9]{32,44})',
                 r'dextools\.io/[^/]+/pair-explorer/([A-Za-z0-9]{32,44})',
                 r'dexscreener\.com/solana/([A-Za-z0-9]{32,44})',
@@ -636,6 +681,8 @@ class TokenMonitor:
                 
                 # ==== TEXT PATTERNS ====
                 # Contract Address patterns
+                r'🪙\s*CA:\s*([A-Za-z0-9]{32,44}pump)',  # Naujas pattern su 🪙 emoji
+                r'Exchange:\s*Pump\.fun.*?Market\s*Cap:\s*\$[\d.]+K.*?CA:\s*([A-Za-z0-9]{32,44}pump)',  # Market Cap pattern
                 r'(?:📃\s*CA:|CA:|Contract Address:)\s*([A-Za-z0-9]{32,44})',
                 r'(?:🔸|💠|🔷)\s*(?:CA|Contract Address):\s*([A-Za-z0-9]{32,44})',
                 r'(?:\n|\\n)\s*Contract Address:\s*([A-Za-z0-9]{32,44})',
@@ -1273,6 +1320,9 @@ class MLIntervalAnalyzer:
             'volume_1h',
             'price_change_1h',
             'bs_ratio_1h',
+            'volume_5m',           # Naujas
+            'price_change_5m',     # Naujas
+            'bs_ratio_5m',     
             
             # Kiti parametrai iš syrax_scanner_data
             'bundle_count',
@@ -1289,74 +1339,71 @@ class MLIntervalAnalyzer:
                     'same_website_count': False,
                     'same_telegram_count': False,
                     'same_twitter_count': False,
-                    'dev_bought_percentage': True,
+                    'dev_bought_percentage': False,
                     'dev_bought_curve_percentage': False,
-                    'dev_sold_percentage': True,
+                    'dev_sold_percentage': False,
                     'holders_total': True,
                     'holders_top10_percentage': True,
-                    'holders_top25_percentage': True,
-                    'holders_top50_percentage': True,
-                    'market_cap': True,
+                    'holders_top25_percentage': False,
+                    'holders_top50_percentage': False,
+                    'market_cap': False,
                     'liquidity_usd': False,
                     'mint_status': False,
                     'freeze_status': False,
                     'lp_status': False,
                     'total_scans': False,
-                    'volume_1h': True,
-                    'price_change_1h': True,
-                    'bs_ratio_1h': True,
-                    'bundle_count': True,
-                    'sniper_activity_tokens': True,
+                    'volume_1h': False,
+                    'price_change_1h': False,
+                    'bs_ratio_1h': False,
+                    'volume_5m': False,           # Naujas
+                    'price_change_5m': False,     # Naujas
+                    'bs_ratio_5m': False,     
+                    'bundle_count': False,
+                    'sniper_activity_tokens': False,
                     'traders_count': True,
-                    'sniper_activity_percentage': False,
+                    'sniper_activity_percentage': True,
                     'notable_bundle_supply_percentage': True,
-                    'bundle_supply_percentage': False
+                    'bundle_supply_percentage': True
                 }
         
-        self.scaler = MinMaxScaler()
-        self.isolation_forest = IsolationForest(contamination='auto', random_state=42)
+        
         self.intervals = {feature: {'min': float('inf'), 'max': float('-inf')} for feature in self.primary_features}
 
-        # IQR daugikliai skirtingiems parametrams
-        self.IQR_MULTIPLIERS = {
-            'price_change_1h': 1.5,      # Mažesnis daugiklis kainų pokyčiams
-            'market_cap': 1.5,           # Vidutinis daugiklis market cap
-            'volume_1h': 1.5,            # Vidutinis daugiklis volume
-            'holders_total': 1.5,        # Vidutinis daugiklis holders
-            'total_scans': 1.5,          # Vidutinis daugiklis skanavimams
-            'traders_count': 1.5,        # Vidutinis daugiklis traders
-            'bs_ratio_1h': 1.5,          # Mažesnis daugiklis buy/sell ratio
-            'liquidity_usd': 1.5,        # Vidutinis daugiklis likvidumui
-            # Naujai pridedami parametrai
-            'sniper_activity_percentage': 1.5,      # Vidutinis daugiklis sniper activity
-            'notable_bundle_supply_percentage': 1.5, # Vidutinis daugiklis notable bundle
-            'bundle_supply_percentage': 1.5,        # Vidutinis daugiklis bundle
-    
-                   
-            'default': 2.5               # Visiems kitiems
-        }
+        
 
         # Absoliučios ribos parametrams
         self.ABSOLUTE_LIMITS = {
-            'price_change_1h': (-70, 1000),      # nuo -100% iki 1000%
-            'market_cap': (5000, 1000000),      # nuo 100$ iki 1B$
-            'volume_1h': (1000, 10000000),          # nuo 10$ iki 10M$
-            'holders_total': (300, 100000),         # nuo 1 iki 100k
-            'liquidity_usd': (0, 10000000),      # nuo 10$ iki 10M$
-            'total_scans': (10, 1000000),          # negali būti 0
-            'traders_count': (500, 100000),         # negali būti 0
-            'bundle_count': (0, 0),               # visada 0
-            'mint_status': (0, 0),                # visada false (0)
-            'freeze_status': (0, 0),              # visada false (0)
-            'lp_status': (1, 1),                  # visada true (1)
-            'sniper_activity_tokens': (0, 0),     # visada 0
-            'bs_ratio_1h': (0.1, 10.0),           # nuo 0.1 iki 10.0
+            'dev_created_tokens': (0, 5),           # xxxxxxxxxxxxxxxxx
+            'same_name_count': (0, 55),               # xxxxxxxxxxxxxxx 
+            'same_website_count': (0, 300),            # xxxxxxxxxxxxxxxxx  
+            'same_telegram_count': (0, 450),           #  xxxxxxxxxxxxxxx
+            'same_twitter_count': (0, 300),            # xxxxxxxxxxxxxx
+            'dev_bought_curve_percentage': (0, 50), #  
+            'price_change_1h': (-50, 1000),      # xxxxxxxxxxxxxxxxx
+            'market_cap': (5000, 1000000),      #  
+            'volume_1h': (1000, 10000000),          #  
+            'holders_total': (100, 100000),         # xxxxxxxxxxxxx
+            'liquidity_usd': (0, 10000000),      #  
+            'total_scans': (15, 1000000),          # 
+            'traders_count': (250, 100000),         # xxxxxxxxxxxxx
+            'bundle_count': (0, 0),               # 
+            'mint_status': (0, 0),                # 
+            'freeze_status': (0, 0),              # 
+            'lp_status': (1, 1),                  # 
+            'sniper_activity_tokens': (0, 0),     # 
+            'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
-            'sniper_activity_percentage': (0, 16),       # nuo 0% iki 100%
-            'notable_bundle_supply_percentage': (0, 16),  # nuo 0% iki 100%
-            'bundle_supply_percentage': (0, 16),          # nuo 0% iki 100%
-            'dev_sold_percentage': (50, 100),        # Tokios pat ribos kaip ir kitiems procentiniams parametrams
-            'dev_bought_percentage': (0, 20),  
+            'sniper_activity_percentage': (0, 11),       # xxxxxxxxxxxxx
+            'notable_bundle_supply_percentage': (0, 40),  # xxxxxxxxxxxxx
+            'bundle_supply_percentage': (0, 16),          # xxxxxxxxxxxxxxxxxxx
+            'dev_sold_percentage': (50, 100),        # 
+            'dev_bought_percentage': (0, 20),
+            'price_change_5m': (-70, 1000),      # 
+            'volume_5m': (1000, 10000000),       # 
+            'bs_ratio_5m': (0.1, 10.0),
+            'holders_top10_percentage': (1, 29),  #xxxxxxxxxxxxxx
+            'holders_top25_percentage': (1, 36),  #xxxxxxxxxxxxxx
+            'holders_top50_percentage': (1, 46)   #xxxxxxxxxxxxxx
         }
 
     def _parse_ratio_value(self, ratio_str) -> float:
@@ -1441,95 +1488,55 @@ class MLIntervalAnalyzer:
         
         
     def calculate_intervals(self, successful_gems: List[Dict]):
-        """Nustato intervalus naudojant ML iš sėkmingų GEM duomenų"""
-        if not successful_gems or len(successful_gems) < Config.MIN_GEMS_FOR_ANALYSIS:
-            logger.warning(f"Nepakanka duomenų ML intervalų nustatymui. Reikia bent {Config.MIN_GEMS_FOR_ANALYSIS} GEM'ų. Dabartinis kiekis: {len(successful_gems)}")
-            return False
-                
-        # Pradžioje nustatome intervalus iš ABSOLUTE_LIMITS visiems parametrams, kurie turi fiksuotas ribas
+        """Nustato intervalus tik iš ABSOLUTE_LIMITS"""
+        
+        # Nustatome intervalus iš ABSOLUTE_LIMITS visiems parametrams
         for feature in self.primary_features:
             if feature in self.ABSOLUTE_LIMITS:
                 min_limit, max_limit = self.ABSOLUTE_LIMITS[feature]
-                if min_limit == max_limit:
-                    self.intervals[feature] = {
-                        'min': min_limit,
-                        'max': max_limit,
-                        'mean': min_limit,
-                        'std': 0
-                    }
-                elif feature in ['sniper_activity_percentage', 'notable_bundle_supply_percentage', 'bundle_supply_percentage']:
-                    self.intervals[feature] = {
-                        'min': min_limit,
-                        'max': max_limit,
-                        'mean': (min_limit + max_limit) / 2,
-                        'std': (max_limit - min_limit) / 4
-                    }
-
-        # Toliau vykdome tik parametrams, kurie neturi fiksuotų reikšmių
-        X = []
-        dynamic_features = []
-        for feature in self.primary_features:
-            if feature not in self.ABSOLUTE_LIMITS or self.ABSOLUTE_LIMITS[feature][0] != self.ABSOLUTE_LIMITS[feature][1]:
-                dynamic_features.append(feature)
-
-        for gem in successful_gems:
-            features = []
-            for feature in dynamic_features:
-                try:
-                    if feature == 'bs_ratio_1h':
-                        ratio_str = gem[feature] if gem[feature] is not None else '1/1'
-                        value = self._parse_ratio_value(ratio_str)
-                    else:
-                        value = float(gem[feature] if gem[feature] is not None else 0)
-                except (ValueError, TypeError):
-                    value = 1.0 if feature == 'bs_ratio_1h' else 0.0
-                features.append(value)
-            if features:  # Pridedame tik jei yra dinaminių parametrų
-                X.append(features)
-        
-        if X:  # Tęsiame tik jei turime dinaminių parametrų
-            X = np.array(X)
-            
-            # Apmokome Isolation Forest
-            X_scaled = self.scaler.fit_transform(X)
-            self.isolation_forest.fit(X_scaled)
-            
-            # Nustatome intervalus kiekvienam dinaminiam parametrui
-            for i, feature in enumerate(dynamic_features):
-                values = X[:, i]
-                predictions = self.isolation_forest.predict(X_scaled)
-                normal_values = values[predictions == 1]
                 
-                if len(normal_values) > 0:
-                    q1 = np.percentile(normal_values, 25)
-                    q3 = np.percentile(normal_values, 75)
-                    iqr = q3 - q1
-                    mean_val = np.mean(normal_values)
-                    std_val = np.std(normal_values)
-                    
-                    multiplier = self.IQR_MULTIPLIERS.get(feature, self.IQR_MULTIPLIERS['default'])
-                    
-                    interval = {
-                        'min': q1 - multiplier * iqr,
-                        'max': q3 + multiplier * iqr,
-                        'mean': mean_val,
-                        'std': std_val
-                    }
-                    
-                    # Pritaikome ABSOLUTE_LIMITS kaip saugiklius
-                    if feature in self.ABSOLUTE_LIMITS:
-                        min_limit, max_limit = self.ABSOLUTE_LIMITS[feature]
-                        interval['min'] = max(min_limit, interval['min'])
-                        interval['max'] = min(max_limit, interval['max'])
-                    
-                    self.intervals[feature] = interval
+                self.intervals[feature] = {
+                    'min': min_limit,
+                    'max': max_limit,
+                    'mean': (min_limit + max_limit) / 2,  # Vidurkis tarp min ir max
+                    'std': (max_limit - min_limit) / 4    # Standartinis nuokrypis kaip ketvirčio intervalo
+                }
+            else:
+                # Jei parametras neturi nustatytų ribų, naudojame default reikšmes
+                logger.warning(f"Parametras '{feature}' neturi nustatytų ABSOLUTE_LIMITS")
+                self.intervals[feature] = {
+                    'min': 0,
+                    'max': 1000000,  # Didelė reikšmė kaip default max
+                    'mean': 500000,  # Vidurkis tarp min ir max
+                    'std': 250000    # Standartinis nuokrypis
+                }
         
-        logger.info(f"ML intervalai atnaujinti sėkmingai su {len(successful_gems)} GEM'ais")
+        logger.info("Intervalai nustatyti iš ABSOLUTE_LIMITS")
         return True
         
+   
     def check_primary_parameters(self, token_data: Dict) -> Dict:
         """Tikrina ar token'o parametrai patenka į ML nustatytus intervalus"""
         results = {}
+
+        # Dev pirkimo/pardavimo sąlyga VISADA tikrinama, nepriklausomai nuo filtrų
+        dev_bought = float(token_data.get('dev_bought_percentage', 0))
+        dev_sold = float(token_data.get('dev_sold_percentage', 0))
+        
+        # Jei dev pirko ir NEPARDAVĖ daug (mažiau nei 80%) - iškart fail
+        if dev_bought > 10 and dev_sold < 80:
+            return {
+                'passed': False,
+                'avg_z_score': float('inf'),
+                'details': {
+                    'dev_activity': {
+                        'value': dev_sold,
+                        'in_range': False,
+                        'z_score': float('inf'),
+                        'message': f'Dev nupirko {dev_bought}% ir nepardavė pakankamai (pardavė tik {dev_sold}%)'
+                    }
+                }
+            }
 
         # Tikriname TIK įjungtus filtrus
         enabled_features = [f for f in self.primary_features if self.filter_status.get(f, False)]
@@ -1859,8 +1866,13 @@ class MLGEMAnalyzer:
             print(json.dumps(db_data, indent=2))
 
             try:
-                # Suformuojame primary check duomenis TIK įjungtiems filtrams
-                primary_data = {}
+                primary_data = {
+                    # Šitie du laukai VISADA pridedami, nepriklausomai nuo filtrų
+                    'dev_bought_percentage': float(db_data.get('dev_bought_percentage', 0)),
+                    'dev_sold_percentage': float(db_data.get('dev_sold_percentage', 0))
+                }
+
+                                    
                 
                 if self.interval_analyzer.filter_status.get('dev_created_tokens', False):
                     primary_data['dev_created_tokens'] = float(db_data.get('dev_created_tokens', 0))
@@ -1877,14 +1889,13 @@ class MLGEMAnalyzer:
                 if self.interval_analyzer.filter_status.get('same_twitter_count', False):
                     primary_data['same_twitter_count'] = float(db_data.get('same_twitter_count', 0))
                     
-                if self.interval_analyzer.filter_status.get('dev_bought_percentage', False):
-                    primary_data['dev_bought_percentage'] = float(db_data.get('dev_bought_percentage', 0))
+                
+                    
                     
                 if self.interval_analyzer.filter_status.get('dev_bought_curve_percentage', False):
                     primary_data['dev_bought_curve_percentage'] = float(db_data.get('dev_bought_curve_percentage', 0))
                     
-                if self.interval_analyzer.filter_status.get('dev_sold_percentage', False):
-                    primary_data['dev_sold_percentage'] = float(db_data.get('dev_sold_percentage', 0))
+                
                     
                 if self.interval_analyzer.filter_status.get('holders_total', False):
                     primary_data['holders_total'] = float(db_data.get('holders_total', 0))
