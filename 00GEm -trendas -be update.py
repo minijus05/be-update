@@ -2589,7 +2589,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM soul_scanner_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time ASC 
+                            ORDER BY scan_time DESC 
                             LIMIT 1
                         ''', (address,))
                         initial_soul_data = dict(self.cursor.fetchone())
@@ -2597,7 +2597,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM syrax_scanner_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time ASC 
+                            ORDER BY scan_time DESC 
                             LIMIT 1
                         ''', (address,))
                         initial_syrax_data = dict(self.cursor.fetchone())
@@ -2605,7 +2605,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM proficy_price_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time ASC 
+                            ORDER BY scan_time DESC 
                             LIMIT 1
                         ''', (address,))
                         initial_proficy_data = dict(self.cursor.fetchone())
