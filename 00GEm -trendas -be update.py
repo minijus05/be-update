@@ -29,9 +29,9 @@ class Config:
     # Telegram settings
     TELEGRAM_API_ID = '25425140'
     TELEGRAM_API_HASH = 'bd0054bc5393af360bc3930a27403c33'
-    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@solautobot_pumpfunalert'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
+    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@gmgnsignals'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
     
-    TELEGRAM_GEM_CHAT = '@testasmano'
+    TELEGRAM_GEM_CHAT = '@groloniksas'
     
     # Scanner settings
     SCANNER_GROUP = '@skaneriss'
@@ -133,50 +133,27 @@ class TokenMonitor:
             
             if token_addresses:
                 for address in token_addresses:
-                    # Patikriname ar token'as jau yra DB ir ar jis nepažymėtas kaip no_recheck
-                    self.db.cursor.execute("SELECT address, total_scans, no_recheck FROM tokens WHERE address = ?", (address,))
-                    token_record = self.db.cursor.fetchone()
-                    token_exists = token_record is not None
-
-                    if token_exists and token_record[2] == 1:  # Jei no_recheck = 1
-                        print(f"\n[SKIPPED] Token already analyzed and alerted: {address}")
-                        continue
-                    is_new_token = "new" in message.lower() or "ALERT" in message or "Descriptionasas" in message
+                    # Dar tikslesnė versija
+                    is_new_token = "newsdsdedv" in message.lower() or ("ATH Price" in message and "Backup BOT:" in message) or "Ddvsdvvssdv" in message
                     is_from_token = "from" in message.lower() or "MADE" in message or "🔝" in message
                     
                     # Patikriname ar token'as jau yra DB
-                    self.db.cursor.execute("SELECT address, total_scans FROM tokens WHERE address = ?", (address,))
-                    token_record = self.db.cursor.fetchone()
-                    token_exists = token_record is not None
-
+                    self.db.cursor.execute("SELECT address FROM tokens WHERE address = ?", (address,))
+                    token_exists = self.db.cursor.fetchone() is not None
+                    
                     if is_new_token:
-                        # Jei token'as jau egzistuoja
+                        # Jei token'as jau egzistuoja - praleidžiam
                         if token_exists:
-                            current_scans = token_record[1] if token_record[1] is not None else 0
-                            if current_scans >= 5:  # Maksimalus skenavimų skaičius
-                                print(f"\n[SKIPPED NEW] Token already exists in database (scanned {current_scans} times): {address}")
-                                continue
-
-                            # Padidiname skenavimų skaičių
-                            self.db.cursor.execute("""
-                                UPDATE tokens 
-                                SET total_scans = ?,
-                                    last_updated = CURRENT_TIMESTAMP
-                                WHERE address = ?
-                            """, (current_scans + 1, address))
-                            self.db.conn.commit()
+                            print(f"\n[SKIPPED NEW] Token already exists in database: {address}")
+                            continue
                             
-                            print(f"\n[RESCANNING] Token exists in database (scan #{current_scans + 1}): {address}")
-                        else:
-                            # Naujo tokeno logika
-                            print(f"\n[NEW TOKEN DETECTED] Address: {address}")
-                            
+                        print(f"\n[NEW TOKEN DETECTED] Address: {address}")
                         # Siunčiame į scanner grupę
                         original_message = await self.scanner_client.send_message(
                             Config.SCANNER_GROUP,
                             address
                         )
-                        logger.info(f"Sent token {'RESCAN' if token_exists else 'NEW'} to scanner group: {address}")
+                        logger.info(f"Sent NEW token to scanner group: {address}")
 
                         # Siunčiame į @solsnifferbot su /scan prefiksu
                         try:
@@ -187,7 +164,7 @@ class TokenMonitor:
                             logger.info(f"Sent scan request to solsnifferbot: {address}")
                         except Exception as e:
                             logger.error(f"Failed to send message to solsnifferbot: {e}")
-                            
+                        
                         # Renkame scannerių duomenis
                         scanner_data = await self._collect_scanner_data(address, original_message)
                         
@@ -198,10 +175,9 @@ class TokenMonitor:
                                 scanner_data['soul'],
                                 scanner_data['syrax'],
                                 scanner_data['proficy'],
-                                is_new_token=not token_exists
+                                is_new_token=True
                             )
-                            
-                            # Analizuojame tokeną
+                            # Analizuojame naują tokeną
                             analysis_result = self.gem_analyzer.analyze_token(scanner_data)
                             
                             if analysis_result['status'] == 'pending':
@@ -209,10 +185,16 @@ class TokenMonitor:
                             else:
                                 await self._handle_analysis_results(analysis_result, scanner_data)
                             
-                            if not token_exists:
-                                print(f"[SUCCESS] Saved NEW token data: {address}")
-                            else:
-                                print(f"[SUCCESS] Updated existing token data (scan #{current_scans + 1}): {address}")
+                            
+                            # Pažymime, kad šio tokeno nebereikia tikrinti
+                            self.db.cursor.execute('''
+                                UPDATE tokens 
+                                SET no_recheck = 0
+                                WHERE address = ?
+                            ''', (address,))
+                            self.db.conn.commit()
+    
+                            print(f"[SUCCESS] Saved NEW token data: {address}")
 
                                                         
                     elif is_from_token:
@@ -636,19 +618,6 @@ class TokenMonitor:
         
         TokenAnalysis"""
 
-            # Čia pridedame - pažymėti, kad daugiau netikrinti šio tokeno
-
-        # Čia pridedame - pažymėti, kad daugiau netikrinti šio tokeno
-            if token_address and token_address != 'Unknown':
-                self.db.cursor.execute("""
-                    UPDATE tokens 
-                    SET no_recheck = 1,
-                        last_updated = CURRENT_TIMESTAMP
-                    WHERE address = ?
-                """, (token_address,))
-                self.db.conn.commit()
-                logger.info(f"Token {token_address} marked as no_recheck after analysis")
-
             return message
 
         except Exception as e:
@@ -657,69 +626,57 @@ class TokenMonitor:
 
     
     def _extract_token_addresses(self, message: str) -> List[str]:
-        """Ištraukia token adresus iš žinutės"""
+        """Ištraukia token adresus iš žinutės, ieško TIK adresų su 'pump' pabaigoje"""
         try:
-            # Pirmiausiai ieškome tiesiogiai pateikto CA (Contract Address)
-            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}(?:pump)?)', message, re.MULTILINE)
+            # PRIORITETAS #1: Ieškome adreso Backup BOT nuorodose
+            backup_match = re.search(r'Backup BOT: US \(https://t\.me/[^?]+\?start=([A-Za-z0-9]{32,44}pump)\)', message)
+            if backup_match and 32 <= len(backup_match.group(1)) <= 44:
+                addr = backup_match.group(1)
+                logger.info(f"Found token address from Backup BOT: {addr}")
+                return [addr]
+                
+            # PRIORITETAS #2: Ieškome adreso po kriptovaliutos simbolio/pavadinimo
+            fdv_match = re.search(r'\$[A-Za-z0-9]+\([^)]+\)\n([A-Za-z0-9]{32,44}pump)', message)
+            if fdv_match and 32 <= len(fdv_match.group(1)) <= 44:
+                addr = fdv_match.group(1)
+                logger.info(f"Found token address from FDV Surge Alert: {addr}")
+                return [addr]
+            
+            # PIRIORETAS #3: Ieškome tiesiogiai adreso naujoje eilutėje
+            pump_match = re.search(r'\n([A-Za-z0-9]{32,44}pump)\n', message)
+            if pump_match and 32 <= len(pump_match.group(1)) <= 44:
+                addr = pump_match.group(1)
+                logger.info(f"Found pump address in new line: {addr}")
+                return [addr]
+                
+            # PRIORITETAS #4: Patikriname ar yra bet kokia Backup BOT nuoroda
+            any_backup_match = re.search(r'start=([A-Za-z0-9]{32,44}pump)', message)
+            if any_backup_match and 32 <= len(any_backup_match.group(1)) <= 44:
+                addr = any_backup_match.group(1)
+                logger.info(f"Found token address from any Backup BOT: {addr}")
+                return [addr]
+            
+            # PRIORITETAS #5: Pirmiausiai ieškome tiesiogiai pateikto CA su 'pump' pabaigoje
+            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}pump)', message, re.MULTILINE)
             if ca_match and 32 <= len(ca_match.group(1)) <= 44:
                 addr = ca_match.group(1)
                 logger.info(f"Found token address from CA: {addr}")
                 return [addr]
             
-            # Jei CA nerastas, ieškome per URL patterns prioriteto tvarka
+            # Jei CA nerastas, ieškome per URL patterns prioriteto tvarka, tik adresai su 'pump'
             patterns = [
                 # ==== URL PATTERNS ====
                 # Trading platformos
-                # Trading platformos
                 r'pump\.fun/([A-Za-z0-9]{32,44}pump)',  # Pump.fun URL be emoji
                 r'📈\s*Pump\.fun\s*\(https?://pump\.fun/([A-Za-z0-9]{32,44}pump)\)',
-                r'geckoterminal\.com/solana/pools/([A-Za-z0-9]{32,44})',
-                r'dextools\.io/[^/]+/pair-explorer/([A-Za-z0-9]{32,44})',
-                r'dexscreener\.com/solana/([A-Za-z0-9]{32,44})',
-                r'birdeye\.so/token/([A-Za-z0-9]{32,44})',
-                r'raydium\.io/swap\?inputCurrency=([A-Za-z0-9]{32,44})',
-                r'jup\.ag/swap/([A-Za-z0-9]{32,44})',
-                
-                # Blockchain explorers
-                r'solscan\.io/token/([A-Za-z0-9]{32,44})',
-                r'solscan\.io/pool/([A-Za-z0-9]{32,44})',
-                r'solana\.fm/address/([A-Za-z0-9]{32,44})',
-                
-                # Scanner bots
-                r'soul_sniper_bot\?start=\d+_([A-Za-z0-9]{32,44})',
-                r'soul_scanner_bot/chart\?startapp=([A-Za-z0-9]{32,44})',
-                r'soul_scanner_bot\?start=([A-Za-z0-9]{32,44})',
-                r'rugcheck\.xyz/tokens/([A-Za-z0-9]{32,44})',
                 
                 # ==== TEXT PATTERNS ====
                 # Contract Address patterns
                 r'🪙\s*CA:\s*([A-Za-z0-9]{32,44}pump)',  # Naujas pattern su 🪙 emoji
                 r'Exchange:\s*Pump\.fun.*?Market\s*Cap:\s*\$[\d.]+K.*?CA:\s*([A-Za-z0-9]{32,44}pump)',  # Market Cap pattern
-                r'(?:📃\s*CA:|CA:|Contract Address:)\s*([A-Za-z0-9]{32,44})',
-                r'(?:🔸|💠|🔷)\s*(?:CA|Contract Address):\s*([A-Za-z0-9]{32,44})',
-                r'(?:\n|\\n)\s*Contract Address:\s*([A-Za-z0-9]{32,44})',
-                r'🔸\s*[^:]+:\s*([A-Za-z0-9]{32,44})',
                 
                 # Special patterns
                 r'([A-Za-z0-9]{32,44}pump)\s+is\s+up',
-                r'from\s+([A-Za-z0-9]{32,44})',
-                r'pool\s*:\s*([A-Za-z0-9]{32,44})',
-                r'token\s*:\s*([A-Za-z0-9]{32,44})',
-                r'address\s*:\s*([A-Za-z0-9]{32,44})',
-                
-                # Signal patterns
-                r'Entry Signal[^\n]*?([A-Za-z0-9]{32,44})',
-                r'Signal[^\n]*?([A-Za-z0-9]{32,44})',
-                r'⚡️[^\n]*?([A-Za-z0-9]{32,44})',
-                r'🚨[^\n]*?([A-Za-z0-9]{32,44})',
-                
-                # Price movement patterns
-                r'([A-Za-z0-9]{32,44})\s+(?:is up|mooning|pumping)',
-                r'(?:up|mooning|pumping)\s+([A-Za-z0-9]{32,44})',
-                
-                # Generic URL patterns (catch-all)
-                r'/([A-Za-z0-9]{32,44})(?:/|$)',
-                r'=([A-Za-z0-9]{32,44})(?:&|$)'
             ]
             
             # Ieškome per kiekvieną pattern, kol randame pirmą tinkamą adresą
@@ -728,16 +685,24 @@ class TokenMonitor:
                 if match:
                     addr = match.group(1)
                     if 32 <= len(addr) <= 44:
-                        logger.info(f"Found token address: {addr}")
+                        logger.info(f"Found pump token address: {addr}")
                         return [addr]
             
+            # Paskutinis šansas - ieškome bet kokio adreso su 'pump' pabaigoje
+            last_resort = re.search(r'([A-Za-z0-9]{32,44}pump)', message)
+            if last_resort and 32 <= len(last_resort.group(1)) <= 44:
+                addr = last_resort.group(1)
+                logger.info(f"Found pump address as last resort: {addr}")
+                return [addr]
+                                
             # Jei nieko neradome
             return []
                 
         except Exception as e:
             logger.error(f"Error extracting token address: {e}")
             return []
-        
+
+    
     def clean_line(self, text: str) -> str:
         """
         Išvalo tekstą nuo nereikalingų simbolių, bet palieka svarbius emoji
@@ -1346,19 +1311,19 @@ class MLIntervalAnalyzer:
         ]
         
         self.filter_status = {
-                    'dev_created_tokens': False,
-                    'same_name_count': False, 
-                    'same_website_count': False,
-                    'same_telegram_count': False,
-                    'same_twitter_count': False,
+                    'dev_created_tokens': True,
+                    'same_name_count': True, 
+                    'same_website_count': True,
+                    'same_telegram_count': True,
+                    'same_twitter_count': True,
                     'dev_bought_percentage': False,
                     'dev_bought_curve_percentage': False,
                     'dev_sold_percentage': False,
                     'holders_total': True,
                     'holders_top10_percentage': True,
-                    'holders_top25_percentage': False,
-                    'holders_top50_percentage': False,
-                    'market_cap': False,
+                    'holders_top25_percentage': True,
+                    'holders_top50_percentage': True,
+                    'market_cap': True,
                     'liquidity_usd': False,
                     'mint_status': False,
                     'freeze_status': False,
@@ -1385,19 +1350,19 @@ class MLIntervalAnalyzer:
 
         # Absoliučios ribos parametrams
         self.ABSOLUTE_LIMITS = {
-            'dev_created_tokens': (0, 5),           # xxxxxxxxxxxxxxxxx
-            'same_name_count': (0, 55),               # xxxxxxxxxxxxxxx 
-            'same_website_count': (0, 300),            # xxxxxxxxxxxxxxxxx  
-            'same_telegram_count': (0, 450),           #  xxxxxxxxxxxxxxx
-            'same_twitter_count': (0, 300),            # xxxxxxxxxxxxxx
+            'dev_created_tokens': (0, 5000),           # xxxxxxxxxxxxxxxxx
+            'same_name_count': (0, 5500),               # xxxxxxxxxxxxxxx 
+            'same_website_count': (0, 3000),            # xxxxxxxxxxxxxxxxx  
+            'same_telegram_count': (0, 4500),           #  xxxxxxxxxxxxxxx
+            'same_twitter_count': (0, 3000),            # xxxxxxxxxxxxxx
             'dev_bought_curve_percentage': (0, 50), #  
-            'price_change_1h': (-50, 1000),      # xxxxxxxxxxxxxxxxx
-            'market_cap': (5000, 1000000),      #  
-            'volume_1h': (1000, 10000000),          #  
-            'holders_total': (20, 100000),         # xxxxxxxxxxxxx
+            'price_change_1h': (-90, -50),      # xxxxxxxxxxxxxxxxx
+            'market_cap': (1000, 30000),      #  
+            'volume_1h': (100, 10000000),          #  
+            'holders_total': (70, 100000),         # xxxxxxxxxxxxx
             'liquidity_usd': (0, 10000000),      #  
-            'total_scans': (15, 1000000),          # 
-            'traders_count': (25, 100000),         # xxxxxxxxxxxxx
+            'total_scans': (1, 1000000),          # 
+            'traders_count': (300, 100000),         # xxxxxxxxxxxxx
             'bundle_count': (0, 0),               # 
             'mint_status': (0, 0),                # 
             'freeze_status': (0, 0),              # 
@@ -1405,17 +1370,17 @@ class MLIntervalAnalyzer:
             'sniper_activity_tokens': (0, 0),     # 
             'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
-            'sniper_activity_percentage': (0, 11),       # xxxxxxxxxxxxx
-            'notable_bundle_supply_percentage': (0, 40),  # xxxxxxxxxxxxx
-            'bundle_supply_percentage': (0, 16),          # xxxxxxxxxxxxxxxxxxx
+            'sniper_activity_percentage': (0, 110),       # xxxxxxxxxxxxx
+            'notable_bundle_supply_percentage': (0, 300),  # xxxxxxxxxxxxx
+            'bundle_supply_percentage': (0, 160),          # xxxxxxxxxxxxxxxxxxx
             'dev_sold_percentage': (50, 100),        # 
             'dev_bought_percentage': (0, 20),
-            'price_change_5m': (-70, 1000),      # 
+            'price_change_5m': (-90, 200),      # 
             'volume_5m': (1000, 10000000),       # 
             'bs_ratio_5m': (0.1, 10.0),
             'holders_top10_percentage': (1, 29),  #xxxxxxxxxxxxxx
-            'holders_top25_percentage': (1, 36),  #xxxxxxxxxxxxxx
-            'holders_top50_percentage': (1, 46)   #xxxxxxxxxxxxxx
+            'holders_top25_percentage': (1, 49),  #xxxxxxxxxxxxxx
+            'holders_top50_percentage': (1, 59)   #xxxxxxxxxxxxxx
         }
 
     def _parse_ratio_value(self, ratio_str) -> float:
@@ -1610,7 +1575,7 @@ class MLGEMAnalyzer:
             'dev_bought_curve_percentage', 'dev_sold_percentage', 'holders_total',
             'holders_top10_percentage', 'holders_top25_percentage',
             'holders_top50_percentage', 'market_cap', 'liquidity_usd',
-            'volume_1h', 'price_change_1h', 'bs_ratio_1h',
+            'volume_1h', 'price_change_1h', 'bs_ratio_1h', 'volume_5m', 'price_change_5m', 'bs_ratio_5m',
             # Nauji parametrai
             'sniper_activity_percentage',
             'notable_bundle_supply_percentage',
@@ -1882,10 +1847,18 @@ class MLGEMAnalyzer:
                     # Šitie du laukai VISADA pridedami, nepriklausomai nuo filtrų
                     'dev_bought_percentage': float(db_data.get('dev_bought_percentage', 0)),
                     'dev_sold_percentage': float(db_data.get('dev_sold_percentage', 0))
-                }
+                }                                   
 
-                                    
-                
+                # Pridėti šiuos patikrinimus į analyze_token metodą:
+                if self.interval_analyzer.filter_status.get('volume_5m', False):
+                    primary_data['volume_5m'] = float(db_data.get('volume_5m', 0))
+                    
+                if self.interval_analyzer.filter_status.get('price_change_5m', False):
+                    primary_data['price_change_5m'] = float(db_data.get('price_change_5m', 0))
+                    
+                if self.interval_analyzer.filter_status.get('bs_ratio_5m', False):
+                    primary_data['bs_ratio_5m'] = self._parse_bs_ratio(db_data.get('bs_ratio_5m', '1/1'))
+                    
                 if self.interval_analyzer.filter_status.get('dev_created_tokens', False):
                     primary_data['dev_created_tokens'] = float(db_data.get('dev_created_tokens', 0))
                     
@@ -2589,7 +2562,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM soul_scanner_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time DESC 
+                            ORDER BY scan_time ASC 
                             LIMIT 1
                         ''', (address,))
                         initial_soul_data = dict(self.cursor.fetchone())
@@ -2597,7 +2570,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM syrax_scanner_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time DESC 
+                            ORDER BY scan_time ASC 
                             LIMIT 1
                         ''', (address,))
                         initial_syrax_data = dict(self.cursor.fetchone())
@@ -2605,7 +2578,7 @@ class DatabaseManager:
                         self.cursor.execute('''
                             SELECT * FROM proficy_price_data 
                             WHERE token_address = ? 
-                            ORDER BY scan_time DESC 
+                            ORDER BY scan_time ASC 
                             LIMIT 1
                         ''', (address,))
                         initial_proficy_data = dict(self.cursor.fetchone())
