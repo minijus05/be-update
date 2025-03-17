@@ -38,6 +38,11 @@ class Config:
     SOUL_SCANNER_BOT = 6872314605
     SYRAX_SCANNER_BOT = 7488438206
     PROFICY_PRICE_BOT = 5457577145
+    CALL_ANALYSER_BOT = None  # ID bus nustatytas dinamiškai pirmą kartą pamatę botą
+    
+    # Call Analyser settings
+    CALL_ANALYSER_ENABLED = True  # Nustatymas įjungti/išjungti Call Analyser funkcionalumą
+    CALL_ANALYSER_MIN_CALLERS = 1  # Minimalus kiekis "callers", kurį laikome svarbiu
 
     USER_LOGIN = 'minijus05'
 
@@ -295,13 +300,15 @@ class TokenMonitor:
         collected_data = {
             'soul': [],
             'syrax': [],
-            'proficy': []
+            'proficy': [],
+            'call_analyser': []  # Pridėtas naujas botas
         }
 
         scanner_data = {
             "soul": None,
             "syrax": None, 
-            "proficy": None
+            "proficy": None,
+            "call_analyser": None
         }
 
         while time.time() - start_time < timeout:
@@ -339,9 +346,15 @@ class TokenMonitor:
                             'text': message.text,
                             'date': message.date
                         })
+                    # Pridėtas patikrinimas žinučių iš @CallAnalyserBot
+                    elif "@CallAnalyser2" in message.text and "Total Call" in message.text:
+                        collected_data['call_analyser'].append({
+                            'text': message.text,
+                            'date': message.date
+                        })
 
                     # Jei turime bent po vieną žinutę iš kiekvieno boto - apdorojame
-                    if all(len(msgs) > 0 for msgs in collected_data.values()):
+                    if all(len(msgs) > 0 for key, msgs in collected_data.items() if key != 'call_analyser'):
                         # Imame naujausias žinutes iš kiekvieno boto
                         latest_soul = max(collected_data['soul'], key=lambda x: x['date'])
                         latest_syrax = max(collected_data['syrax'], key=lambda x: x['date'])
@@ -351,6 +364,14 @@ class TokenMonitor:
                         scanner_data["soul"] = self.parse_soul_scanner_response(latest_soul['text'])
                         scanner_data["syrax"] = self.parse_syrax_scanner_response(latest_syrax['text'])
                         scanner_data["proficy"] = await self.parse_proficy_price(latest_proficy['text'])
+                        
+                        # Jeigu turime CallAnalyser duomenų, apdorojame
+                        if collected_data['call_analyser']:
+                            latest_call = max(collected_data['call_analyser'], key=lambda x: x['date'])
+                            scanner_data["call_analyser"] = self.parse_call_analyser_response(latest_call['text'])
+                            logger.info(f"Call Analyser data time: {latest_call['date']}")
+                        else:
+                            scanner_data["call_analyser"] = {'total_call': 0, 'callers': 0}
 
                         # Logginame sėkmingą duomenų surinkimą
                         logger.info(f"Collected all scanner data for {address}")
@@ -394,6 +415,14 @@ class TokenMonitor:
                     '5m': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'},
                     '1h': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'}
                 }
+            
+            # Tikriname ar turime CallAnalyser duomenis
+            if collected_data['call_analyser']:
+                latest_call = max(collected_data['call_analyser'], key=lambda x: x['date'])
+                scanner_data["call_analyser"] = self.parse_call_analyser_response(latest_call['text'])
+            else:
+                missing.append('call_analyser')
+                scanner_data["call_analyser"] = {'total_call': 0, 'callers': 0}
                 
             logger.warning(f"Timeout reached. Missing data from: {missing}")
             return scanner_data
@@ -1106,6 +1135,36 @@ class TokenMonitor:
                 'dev_sold': {'times': 'N/A', 'sol': 'N/A', 'percentage': 'N/A'}
             }
 
+    def parse_call_analyser_response(self, text: str) -> Dict:
+        """Parse Call Analyser Bot message"""
+        try:
+            # Patikriname ar gavome klaidos pranešimą
+            if not text or "could not analyze" in text.lower():
+                logger.warning("Call Analyser could not analyze the token")
+                return {
+                    'error': "Call analysis failed",
+                    'callers': 0
+                }
+
+            data = {
+                'callers': 0
+            }
+
+            # Ieškome callers skaičiaus
+            callers_match = re.search(r'calls from (\d+) callers', text)
+            if callers_match:
+                data['callers'] = int(callers_match.group(1))
+                logger.info(f"Found {data['callers']} callers from Call Analyser")
+
+            return data
+
+        except Exception as e:
+            logger.error(f"Error parsing Call Analyser message: {e}")
+            return {
+                'error': f"Parsing error: {str(e)}",
+                'callers': 0
+            }
+
     async def parse_proficy_price(self, message: str) -> Dict:
         """
         Apdoroja Proficy bot'o žinutę su kainų duomenimis.
@@ -1274,6 +1333,7 @@ class MLIntervalAnalyzer:
             # Syrax Scanner parametrai (syrax_scanner_data lentelė)
             'dev_created_tokens',
             'same_name_count',
+            'callers',
             'same_website_count',
             'same_telegram_count',
             'same_twitter_count',
@@ -1334,6 +1394,7 @@ class MLIntervalAnalyzer:
                     'bs_ratio_1h': False,
                     'volume_5m': False,           # Naujas
                     'price_change_5m': False,     # Naujas
+                    'callers': True,
                     'bs_ratio_5m': False,     
                     'bundle_count': False,
                     'sniper_activity_tokens': False,
@@ -1370,6 +1431,7 @@ class MLIntervalAnalyzer:
             'sniper_activity_tokens': (0, 0),     # 
             'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
+            'callers': (1, 100),
             'sniper_activity_percentage': (0, 110),       # xxxxxxxxxxxxx
             'notable_bundle_supply_percentage': (0, 300),  # xxxxxxxxxxxxx
             'bundle_supply_percentage': (0, 160),          # xxxxxxxxxxxxxxxxxxx
@@ -1852,7 +1914,11 @@ class MLGEMAnalyzer:
                 # Pridėti šiuos patikrinimus į analyze_token metodą:
                 if self.interval_analyzer.filter_status.get('volume_5m', False):
                     primary_data['volume_5m'] = float(db_data.get('volume_5m', 0))
-                    
+
+                # Pridedame callers parametrą iš Call Analyser, jei jis yra įjungtas
+                if self.interval_analyzer.filter_status.get('callers', False) and 'call_analyser' in scanner_data:
+                    primary_data['callers'] = float(scanner_data['call_analyser'].get('callers', 0))
+                                    
                 if self.interval_analyzer.filter_status.get('price_change_5m', False):
                     primary_data['price_change_5m'] = float(db_data.get('price_change_5m', 0))
                     
