@@ -29,9 +29,9 @@ class Config:
     # Telegram settings
     TELEGRAM_API_ID = '25425140'
     TELEGRAM_API_HASH = 'bd0054bc5393af360bc3930a27403c33'
-    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@gmgnsignals'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
+    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@signalsolanaby4am'] #  '@gmgnsignals'    '@solearlytrending', '@HighVolumeBordga', '@solanahypee'
     
-    TELEGRAM_GEM_CHAT = '@groloniksas'
+    TELEGRAM_GEM_CHAT = '@testasmano'
     
     # Scanner settings
     SCANNER_GROUP = '@skaneriss'
@@ -139,8 +139,8 @@ class TokenMonitor:
             if token_addresses:
                 for address in token_addresses:
                     # Dar tikslesnė versija
-                    is_new_token = "newsdsdedv" in message.lower() or ("ATH Price" in message and "Backup BOT:" in message) or "Ddvsdvvssdv" in message
-                    is_from_token = "from" in message.lower() or "MADE" in message or "🔝" in message
+                    is_new_token = "Holders" in message.lower() or ("ATH Price000" in message and "Backup BOT:" in message) or ("Pump King of the hill00" in message and "Backup BOT:" in message) 
+                    is_from_token = "fromss" in message.lower() or "MADEss" in message or "🔝seff" in message
                     
                     # Patikriname ar token'as jau yra DB
                     self.db.cursor.execute("SELECT address FROM tokens WHERE address = ?", (address,))
@@ -676,6 +676,13 @@ class TokenMonitor:
             if pump_match and 32 <= len(pump_match.group(1)) <= 44:
                 addr = pump_match.group(1)
                 logger.info(f"Found pump address in new line: {addr}")
+                return [addr]
+
+            # PRIORITETAS #3.5: Ieškome adreso CallAnalyser formatu - NAUJAS ŠABLONAS
+            call_match = re.search(r'Total calls: \d+\s*\n‎?([A-Za-z0-9]{32,44}pump)‎?', message)
+            if call_match and 32 <= len(call_match.group(1)) <= 44:
+                addr = call_match.group(1)
+                logger.info(f"Found pump address from Call Analyser format: {addr}")
                 return [addr]
                 
             # PRIORITETAS #4: Patikriname ar yra bet kokia Backup BOT nuoroda
@@ -1344,6 +1351,7 @@ class MLIntervalAnalyzer:
             'holders_top10_percentage',
             'holders_top25_percentage',
             'holders_top50_percentage',
+            'created_time_hours',
             
             # Soul Scanner parametrai (soul_scanner_data lentelė)
             'market_cap',
@@ -1394,7 +1402,8 @@ class MLIntervalAnalyzer:
                     'bs_ratio_1h': False,
                     'volume_5m': False,           # Naujas
                     'price_change_5m': False,     # Naujas
-                    'callers': True,
+                    'created_time_hours': True,
+                    'callers': False,
                     'bs_ratio_5m': False,     
                     'bundle_count': False,
                     'sniper_activity_tokens': False,
@@ -1411,19 +1420,19 @@ class MLIntervalAnalyzer:
 
         # Absoliučios ribos parametrams
         self.ABSOLUTE_LIMITS = {
-            'dev_created_tokens': (0, 5000),           # xxxxxxxxxxxxxxxxx
+            'dev_created_tokens': (0, 500),           # xxxxxxxxxxxxxxxxx
             'same_name_count': (0, 5500),               # xxxxxxxxxxxxxxx 
-            'same_website_count': (0, 3000),            # xxxxxxxxxxxxxxxxx  
-            'same_telegram_count': (0, 4500),           #  xxxxxxxxxxxxxxx
-            'same_twitter_count': (0, 3000),            # xxxxxxxxxxxxxx
+            'same_website_count': (0, 30000),            # xxxxxxxxxxxxxxxxx  
+            'same_telegram_count': (0, 45000),           #  xxxxxxxxxxxxxxx
+            'same_twitter_count': (0, 30000),            # xxxxxxxxxxxxxx
             'dev_bought_curve_percentage': (0, 50), #  
             'price_change_1h': (-90, -50),      # xxxxxxxxxxxxxxxxx
-            'market_cap': (1000, 30000),      #  
+            'market_cap': (1000, 270000),      #  
             'volume_1h': (100, 10000000),          #  
-            'holders_total': (70, 100000),         # xxxxxxxxxxxxx
+            'holders_total': (20, 100000),         # xxxxxxxxxxxxx
             'liquidity_usd': (0, 10000000),      #  
-            'total_scans': (1, 1000000),          # 
-            'traders_count': (300, 100000),         # xxxxxxxxxxxxx
+            'total_scans': (15, 1000000),          # 
+            'traders_count': (25, 100000),         # xxxxxxxxxxxxx
             'bundle_count': (0, 0),               # 
             'mint_status': (0, 0),                # 
             'freeze_status': (0, 0),              # 
@@ -1431,18 +1440,19 @@ class MLIntervalAnalyzer:
             'sniper_activity_tokens': (0, 0),     # 
             'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
-            'callers': (1, 100),
+            'callers': (1, 1000),
+            'created_time_hours': (0, 12),  # Ribos nuo 0 iki 168 val. (7 dienos)
             'sniper_activity_percentage': (0, 110),       # xxxxxxxxxxxxx
-            'notable_bundle_supply_percentage': (0, 300),  # xxxxxxxxxxxxx
-            'bundle_supply_percentage': (0, 160),          # xxxxxxxxxxxxxxxxxxx
+            'notable_bundle_supply_percentage': (0, 400),  # xxxxxxxxxxxxx
+            'bundle_supply_percentage': (0, 170),          # xxxxxxxxxxxxxxxxxxx
             'dev_sold_percentage': (50, 100),        # 
             'dev_bought_percentage': (0, 20),
             'price_change_5m': (-90, 200),      # 
             'volume_5m': (1000, 10000000),       # 
             'bs_ratio_5m': (0.1, 10.0),
-            'holders_top10_percentage': (1, 29),  #xxxxxxxxxxxxxx
-            'holders_top25_percentage': (1, 49),  #xxxxxxxxxxxxxx
-            'holders_top50_percentage': (1, 59)   #xxxxxxxxxxxxxx
+            'holders_top10_percentage': (1, 290),  #xxxxxxxxxxxxxx
+            'holders_top25_percentage': (1, 460),  #xxxxxxxxxxxxxx
+            'holders_top50_percentage': (1, 560)   #xxxxxxxxxxxxxx
         }
 
     def _parse_ratio_value(self, ratio_str) -> float:
@@ -1479,6 +1489,60 @@ class MLIntervalAnalyzer:
             
         except (ValueError, TypeError, ZeroDivisionError, AttributeError):
             return 1.0  # Default santykis 1:1
+
+    def parse_created_time(self, time_str: str) -> float:
+        """
+        Konvertuoja tekstinį laiko formatą į valandas
+        
+        Args:
+            time_str: Laikas teksto formatu, pvz., "13 hours ago", "34 minutes ago", "1 day ago"
+            
+        Returns:
+            float: Valandos nuo sukūrimo
+        """
+        try:
+            if not time_str:
+                return 168.0  # Default reikšmė - 7 dienos
+                
+            time_str = time_str.lower()
+            
+            # Ištraukiame skaitinius duomenis
+            if "minute" in time_str:
+                match = re.search(r'(\d+)\s*minute', time_str)
+                if match:
+                    return float(match.group(1)) / 60.0  # Konvertuojame minutes į valandas
+                    
+            elif "hour" in time_str:
+                match = re.search(r'(\d+)\s*hour', time_str)
+                if match:
+                    return float(match.group(1))  # Jau yra valandos
+                    
+            elif "day" in time_str:
+                match = re.search(r'(\d+)\s*day', time_str)
+                if match:
+                    return float(match.group(1)) * 24.0  # Konvertuojame dienas į valandas
+                    
+            elif "week" in time_str:
+                match = re.search(r'(\d+)\s*week', time_str)
+                if match:
+                    return float(match.group(1)) * 24.0 * 7.0  # Konvertuojame savaites į valandas
+                    
+            elif "month" in time_str:
+                match = re.search(r'(\d+)\s*month', time_str)
+                if match:
+                    return float(match.group(1)) * 24.0 * 30.0  # Apytiksliai konvertuojame mėnesius į valandas
+                    
+            elif "year" in time_str:
+                match = re.search(r'(\d+)\s*year', time_str)
+                if match:
+                    return float(match.group(1)) * 24.0 * 365.0  # Apytiksliai konvertuojame metus į valandas
+            
+            # Jei formatas neatpažintas, grąžiname maksimumą
+            return 168.0  # Default - 7 dienos
+            
+        except Exception as e:
+            logger.error(f"Error parsing created_time: {e}")
+            return 168.0  # Default reikšmė klaidos atveju
 
     def validate_interval(self, feature: str, interval: dict) -> dict:
         """Validuoja ir koreguoja intervalą pagal absoliučias ribas"""
@@ -1916,8 +1980,13 @@ class MLGEMAnalyzer:
                     primary_data['volume_5m'] = float(db_data.get('volume_5m', 0))
 
                 # Pridedame callers parametrą iš Call Analyser, jei jis yra įjungtas
-                if self.interval_analyzer.filter_status.get('callers', False) and 'call_analyser' in scanner_data:
-                    primary_data['callers'] = float(scanner_data['call_analyser'].get('callers', 0))
+                if self.interval_analyzer.filter_status.get('callers', False) and 'call_analyser' in token_data:
+                    primary_data['callers'] = float(token_data['call_analyser'].get('callers', 0))
+
+                # Pridedame created_time_hours, jei filtras įjungtas
+                if self.interval_analyzer.filter_status.get('created_time_hours', False):
+                    created_time_str = db_data.get('created_time')
+                    primary_data['created_time_hours'] = self.interval_analyzer.parse_created_time(created_time_str)
                                     
                 if self.interval_analyzer.filter_status.get('price_change_5m', False):
                     primary_data['price_change_5m'] = float(db_data.get('price_change_5m', 0))
