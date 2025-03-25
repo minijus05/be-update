@@ -29,7 +29,7 @@ class Config:
     # Telegram settings
     TELEGRAM_API_ID = '25425140'
     TELEGRAM_API_HASH = 'bd0054bc5393af360bc3930a27403c33'
-    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@signalsolanaby4am'] #  '@gmgnsignals'    '@solearlytrending', '@HighVolumeBordga', '@solanahypee'
+    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@signalsolanaby4am'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
     
     TELEGRAM_GEM_CHAT = '@testasmano'
     
@@ -38,11 +38,6 @@ class Config:
     SOUL_SCANNER_BOT = 6872314605
     SYRAX_SCANNER_BOT = 7488438206
     PROFICY_PRICE_BOT = 5457577145
-    CALL_ANALYSER_BOT = None  # ID bus nustatytas dinamiškai pirmą kartą pamatę botą
-    
-    # Call Analyser settings
-    CALL_ANALYSER_ENABLED = True  # Nustatymas įjungti/išjungti Call Analyser funkcionalumą
-    CALL_ANALYSER_MIN_CALLERS = 1  # Minimalus kiekis "callers", kurį laikome svarbiu
 
     USER_LOGIN = 'minijus05'
 
@@ -139,7 +134,7 @@ class TokenMonitor:
             if token_addresses:
                 for address in token_addresses:
                     # Dar tikslesnė versija
-                    is_new_token = "Holders" in message.lower() or ("ATH Price000" in message and "Backup BOT:" in message) or ("Pump King of the hill00" in message and "Backup BOT:" in message) 
+                    is_new_token = "Pumpfun" in message.lower() or ("ATH Price000" in message and "Backup BOT:" in message) or ("Pump King of the hill00" in message and "Backup BOT:" in message) 
                     is_from_token = "fromss" in message.lower() or "MADEss" in message or "🔝seff" in message
                     
                     # Patikriname ar token'as jau yra DB
@@ -300,15 +295,13 @@ class TokenMonitor:
         collected_data = {
             'soul': [],
             'syrax': [],
-            'proficy': [],
-            'call_analyser': []  # Pridėtas naujas botas
+            'proficy': []
         }
 
         scanner_data = {
             "soul": None,
             "syrax": None, 
-            "proficy": None,
-            "call_analyser": None
+            "proficy": None
         }
 
         while time.time() - start_time < timeout:
@@ -346,15 +339,9 @@ class TokenMonitor:
                             'text': message.text,
                             'date': message.date
                         })
-                    # Pridėtas patikrinimas žinučių iš @CallAnalyserBot
-                    elif "@CallAnalyser2" in message.text and "Total Call" in message.text:
-                        collected_data['call_analyser'].append({
-                            'text': message.text,
-                            'date': message.date
-                        })
 
                     # Jei turime bent po vieną žinutę iš kiekvieno boto - apdorojame
-                    if all(len(msgs) > 0 for key, msgs in collected_data.items() if key != 'call_analyser'):
+                    if all(len(msgs) > 0 for msgs in collected_data.values()):
                         # Imame naujausias žinutes iš kiekvieno boto
                         latest_soul = max(collected_data['soul'], key=lambda x: x['date'])
                         latest_syrax = max(collected_data['syrax'], key=lambda x: x['date'])
@@ -364,14 +351,6 @@ class TokenMonitor:
                         scanner_data["soul"] = self.parse_soul_scanner_response(latest_soul['text'])
                         scanner_data["syrax"] = self.parse_syrax_scanner_response(latest_syrax['text'])
                         scanner_data["proficy"] = await self.parse_proficy_price(latest_proficy['text'])
-                        
-                        # Jeigu turime CallAnalyser duomenų, apdorojame
-                        if collected_data['call_analyser']:
-                            latest_call = max(collected_data['call_analyser'], key=lambda x: x['date'])
-                            scanner_data["call_analyser"] = self.parse_call_analyser_response(latest_call['text'])
-                            logger.info(f"Call Analyser data time: {latest_call['date']}")
-                        else:
-                            scanner_data["call_analyser"] = {'total_call': 0, 'callers': 0}
 
                         # Logginame sėkmingą duomenų surinkimą
                         logger.info(f"Collected all scanner data for {address}")
@@ -415,14 +394,6 @@ class TokenMonitor:
                     '5m': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'},
                     '1h': {'price_change': 0, 'volume': 0, 'bs_ratio': '1/1'}
                 }
-            
-            # Tikriname ar turime CallAnalyser duomenis
-            if collected_data['call_analyser']:
-                latest_call = max(collected_data['call_analyser'], key=lambda x: x['date'])
-                scanner_data["call_analyser"] = self.parse_call_analyser_response(latest_call['text'])
-            else:
-                missing.append('call_analyser')
-                scanner_data["call_analyser"] = {'total_call': 0, 'callers': 0}
                 
             logger.warning(f"Timeout reached. Missing data from: {missing}")
             return scanner_data
@@ -655,64 +626,69 @@ class TokenMonitor:
 
     
     def _extract_token_addresses(self, message: str) -> List[str]:
-        """Ištraukia token adresus iš žinutės, ieško TIK adresų su 'pump' pabaigoje"""
+        """Ištraukia token adresus iš žinutės"""
         try:
-            # PRIORITETAS #1: Ieškome adreso Backup BOT nuorodose
-            backup_match = re.search(r'Backup BOT: US \(https://t\.me/[^?]+\?start=([A-Za-z0-9]{32,44}pump)\)', message)
-            if backup_match and 32 <= len(backup_match.group(1)) <= 44:
-                addr = backup_match.group(1)
-                logger.info(f"Found token address from Backup BOT: {addr}")
-                return [addr]
-                
-            # PRIORITETAS #2: Ieškome adreso po kriptovaliutos simbolio/pavadinimo
-            fdv_match = re.search(r'\$[A-Za-z0-9]+\([^)]+\)\n([A-Za-z0-9]{32,44}pump)', message)
-            if fdv_match and 32 <= len(fdv_match.group(1)) <= 44:
-                addr = fdv_match.group(1)
-                logger.info(f"Found token address from FDV Surge Alert: {addr}")
-                return [addr]
-            
-            # PIRIORETAS #3: Ieškome tiesiogiai adreso naujoje eilutėje
-            pump_match = re.search(r'\n([A-Za-z0-9]{32,44}pump)\n', message)
-            if pump_match and 32 <= len(pump_match.group(1)) <= 44:
-                addr = pump_match.group(1)
-                logger.info(f"Found pump address in new line: {addr}")
-                return [addr]
-
-            # PRIORITETAS #3.5: Ieškome adreso CallAnalyser formatu - NAUJAS ŠABLONAS
-            call_match = re.search(r'Total calls: \d+\s*\n‎?([A-Za-z0-9]{32,44}pump)‎?', message)
-            if call_match and 32 <= len(call_match.group(1)) <= 44:
-                addr = call_match.group(1)
-                logger.info(f"Found pump address from Call Analyser format: {addr}")
-                return [addr]
-                
-            # PRIORITETAS #4: Patikriname ar yra bet kokia Backup BOT nuoroda
-            any_backup_match = re.search(r'start=([A-Za-z0-9]{32,44}pump)', message)
-            if any_backup_match and 32 <= len(any_backup_match.group(1)) <= 44:
-                addr = any_backup_match.group(1)
-                logger.info(f"Found token address from any Backup BOT: {addr}")
-                return [addr]
-            
-            # PRIORITETAS #5: Pirmiausiai ieškome tiesiogiai pateikto CA su 'pump' pabaigoje
-            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}pump)', message, re.MULTILINE)
+            # Pirmiausiai ieškome tiesiogiai pateikto CA (Contract Address)
+            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}(?:pump)?)', message, re.MULTILINE)
             if ca_match and 32 <= len(ca_match.group(1)) <= 44:
                 addr = ca_match.group(1)
                 logger.info(f"Found token address from CA: {addr}")
                 return [addr]
             
-            # Jei CA nerastas, ieškome per URL patterns prioriteto tvarka, tik adresai su 'pump'
+            # Jei CA nerastas, ieškome per URL patterns prioriteto tvarka
             patterns = [
                 # ==== URL PATTERNS ====
                 # Trading platformos
+                r'pump\.fun/coin/([A-Za-z0-9]{32,44}pump)',  # Nauja eilutė - pump.fun/coin URL formatas
                 r'pump\.fun/([A-Za-z0-9]{32,44}pump)',  # Pump.fun URL be emoji
                 r'📈\s*Pump\.fun\s*\(https?://pump\.fun/([A-Za-z0-9]{32,44}pump)\)',
+                r'geckoterminal\.com/solana/pools/([A-Za-z0-9]{32,44})',
+                r'dextools\.io/[^/]+/pair-explorer/([A-Za-z0-9]{32,44})',
+                r'dexscreener\.com/solana/([A-Za-z0-9]{32,44})',
+                r'birdeye\.so/token/([A-Za-z0-9]{32,44})',
+                r'raydium\.io/swap\?inputCurrency=([A-Za-z0-9]{32,44})',
+                r'jup\.ag/swap/([A-Za-z0-9]{32,44})',
+                
+                # Blockchain explorers
+                r'solscan\.io/token/([A-Za-z0-9]{32,44})',
+                r'solscan\.io/pool/([A-Za-z0-9]{32,44})',
+                r'solana\.fm/address/([A-Za-z0-9]{32,44})',
+                
+                # Scanner bots
+                r'soul_sniper_bot\?start=\d+_([A-Za-z0-9]{32,44})',
+                r'soul_scanner_bot/chart\?startapp=([A-Za-z0-9]{32,44})',
+                r'soul_scanner_bot\?start=([A-Za-z0-9]{32,44})',
+                r'rugcheck\.xyz/tokens/([A-Za-z0-9]{32,44})',
                 
                 # ==== TEXT PATTERNS ====
                 # Contract Address patterns
                 r'🪙\s*CA:\s*([A-Za-z0-9]{32,44}pump)',  # Naujas pattern su 🪙 emoji
                 r'Exchange:\s*Pump\.fun.*?Market\s*Cap:\s*\$[\d.]+K.*?CA:\s*([A-Za-z0-9]{32,44}pump)',  # Market Cap pattern
+                r'(?:📃\s*CA:|CA:|Contract Address:)\s*([A-Za-z0-9]{32,44})',
+                r'(?:🔸|💠|🔷)\s*(?:CA|Contract Address):\s*([A-Za-z0-9]{32,44})',
+                r'(?:\n|\\n)\s*Contract Address:\s*([A-Za-z0-9]{32,44})',
+                r'🔸\s*[^:]+:\s*([A-Za-z0-9]{32,44})',
                 
                 # Special patterns
                 r'([A-Za-z0-9]{32,44}pump)\s+is\s+up',
+                r'from\s+([A-Za-z0-9]{32,44})',
+                r'pool\s*:\s*([A-Za-z0-9]{32,44})',
+                r'token\s*:\s*([A-Za-z0-9]{32,44})',
+                r'address\s*:\s*([A-Za-z0-9]{32,44})',
+                
+                # Signal patterns
+                r'Entry Signal[^\n]*?([A-Za-z0-9]{32,44})',
+                r'Signal[^\n]*?([A-Za-z0-9]{32,44})',
+                r'⚡️[^\n]*?([A-Za-z0-9]{32,44})',
+                r'🚨[^\n]*?([A-Za-z0-9]{32,44})',
+                
+                # Price movement patterns
+                r'([A-Za-z0-9]{32,44})\s+(?:is up|mooning|pumping)',
+                r'(?:up|mooning|pumping)\s+([A-Za-z0-9]{32,44})',
+                
+                # Generic URL patterns (catch-all)
+                r'/([A-Za-z0-9]{32,44})(?:/|$)',
+                r'=([A-Za-z0-9]{32,44})(?:&|$)'
             ]
             
             # Ieškome per kiekvieną pattern, kol randame pirmą tinkamą adresą
@@ -721,24 +697,16 @@ class TokenMonitor:
                 if match:
                     addr = match.group(1)
                     if 32 <= len(addr) <= 44:
-                        logger.info(f"Found pump token address: {addr}")
+                        logger.info(f"Found token address: {addr}")
                         return [addr]
             
-            # Paskutinis šansas - ieškome bet kokio adreso su 'pump' pabaigoje
-            last_resort = re.search(r'([A-Za-z0-9]{32,44}pump)', message)
-            if last_resort and 32 <= len(last_resort.group(1)) <= 44:
-                addr = last_resort.group(1)
-                logger.info(f"Found pump address as last resort: {addr}")
-                return [addr]
-                                
             # Jei nieko neradome
             return []
                 
         except Exception as e:
             logger.error(f"Error extracting token address: {e}")
             return []
-
-    
+        
     def clean_line(self, text: str) -> str:
         """
         Išvalo tekstą nuo nereikalingų simbolių, bet palieka svarbius emoji
@@ -1142,36 +1110,6 @@ class TokenMonitor:
                 'dev_sold': {'times': 'N/A', 'sol': 'N/A', 'percentage': 'N/A'}
             }
 
-    def parse_call_analyser_response(self, text: str) -> Dict:
-        """Parse Call Analyser Bot message"""
-        try:
-            # Patikriname ar gavome klaidos pranešimą
-            if not text or "could not analyze" in text.lower():
-                logger.warning("Call Analyser could not analyze the token")
-                return {
-                    'error': "Call analysis failed",
-                    'callers': 0
-                }
-
-            data = {
-                'callers': 0
-            }
-
-            # Ieškome callers skaičiaus
-            callers_match = re.search(r'calls from (\d+) callers', text)
-            if callers_match:
-                data['callers'] = int(callers_match.group(1))
-                logger.info(f"Found {data['callers']} callers from Call Analyser")
-
-            return data
-
-        except Exception as e:
-            logger.error(f"Error parsing Call Analyser message: {e}")
-            return {
-                'error': f"Parsing error: {str(e)}",
-                'callers': 0
-            }
-
     async def parse_proficy_price(self, message: str) -> Dict:
         """
         Apdoroja Proficy bot'o žinutę su kainų duomenimis.
@@ -1340,7 +1278,6 @@ class MLIntervalAnalyzer:
             # Syrax Scanner parametrai (syrax_scanner_data lentelė)
             'dev_created_tokens',
             'same_name_count',
-            'callers',
             'same_website_count',
             'same_telegram_count',
             'same_twitter_count',
@@ -1351,7 +1288,6 @@ class MLIntervalAnalyzer:
             'holders_top10_percentage',
             'holders_top25_percentage',
             'holders_top50_percentage',
-            'created_time_hours',
             
             # Soul Scanner parametrai (soul_scanner_data lentelė)
             'market_cap',
@@ -1401,9 +1337,7 @@ class MLIntervalAnalyzer:
                     'price_change_1h': False,
                     'bs_ratio_1h': False,
                     'volume_5m': False,           # Naujas
-                    'price_change_5m': False,     # Naujas
-                    'created_time_hours': True,
-                    'callers': False,
+                    'price_change_5m': True,     # Naujas
                     'bs_ratio_5m': False,     
                     'bundle_count': False,
                     'sniper_activity_tokens': False,
@@ -1420,19 +1354,19 @@ class MLIntervalAnalyzer:
 
         # Absoliučios ribos parametrams
         self.ABSOLUTE_LIMITS = {
-            'dev_created_tokens': (0, 500),           # xxxxxxxxxxxxxxxxx
+            'dev_created_tokens': (0, 5000),           # xxxxxxxxxxxxxxxxx
             'same_name_count': (0, 5500),               # xxxxxxxxxxxxxxx 
             'same_website_count': (0, 30000),            # xxxxxxxxxxxxxxxxx  
             'same_telegram_count': (0, 45000),           #  xxxxxxxxxxxxxxx
             'same_twitter_count': (0, 30000),            # xxxxxxxxxxxxxx
             'dev_bought_curve_percentage': (0, 50), #  
             'price_change_1h': (-90, -50),      # xxxxxxxxxxxxxxxxx
-            'market_cap': (1000, 270000),      #  
-            'volume_1h': (100, 10000000),          #  
-            'holders_total': (20, 100000),         # xxxxxxxxxxxxx
+            'market_cap': (1000, 10000000),      #  
+            'volume_1h': (1000, 10000000),          #  
+            'holders_total': (5, 100000),         # xxxxxxxxxxxxx
             'liquidity_usd': (0, 10000000),      #  
-            'total_scans': (15, 1000000),          # 
-            'traders_count': (25, 100000),         # xxxxxxxxxxxxx
+            'total_scans': (1, 1000000),          # 
+            'traders_count': (5, 100000),         # xxxxxxxxxxxxx
             'bundle_count': (0, 0),               # 
             'mint_status': (0, 0),                # 
             'freeze_status': (0, 0),              # 
@@ -1440,19 +1374,17 @@ class MLIntervalAnalyzer:
             'sniper_activity_tokens': (0, 0),     # 
             'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
-            'callers': (1, 1000),
-            'created_time_hours': (0, 12),  # Ribos nuo 0 iki 168 val. (7 dienos)
             'sniper_activity_percentage': (0, 110),       # xxxxxxxxxxxxx
-            'notable_bundle_supply_percentage': (0, 400),  # xxxxxxxxxxxxx
-            'bundle_supply_percentage': (0, 170),          # xxxxxxxxxxxxxxxxxxx
+            'notable_bundle_supply_percentage': (0, 600),  # xxxxxxxxxxxxx
+            'bundle_supply_percentage': (0, 160),          # xxxxxxxxxxxxxxxxxxx
             'dev_sold_percentage': (50, 100),        # 
             'dev_bought_percentage': (0, 20),
             'price_change_5m': (-90, 200),      # 
             'volume_5m': (1000, 10000000),       # 
             'bs_ratio_5m': (0.1, 10.0),
             'holders_top10_percentage': (1, 290),  #xxxxxxxxxxxxxx
-            'holders_top25_percentage': (1, 460),  #xxxxxxxxxxxxxx
-            'holders_top50_percentage': (1, 560)   #xxxxxxxxxxxxxx
+            'holders_top25_percentage': (1, 500),  #xxxxxxxxxxxxxx
+            'holders_top50_percentage': (1, 600)   #xxxxxxxxxxxxxx
         }
 
     def _parse_ratio_value(self, ratio_str) -> float:
@@ -1489,60 +1421,6 @@ class MLIntervalAnalyzer:
             
         except (ValueError, TypeError, ZeroDivisionError, AttributeError):
             return 1.0  # Default santykis 1:1
-
-    def parse_created_time(self, time_str: str) -> float:
-        """
-        Konvertuoja tekstinį laiko formatą į valandas
-        
-        Args:
-            time_str: Laikas teksto formatu, pvz., "13 hours ago", "34 minutes ago", "1 day ago"
-            
-        Returns:
-            float: Valandos nuo sukūrimo
-        """
-        try:
-            if not time_str:
-                return 168.0  # Default reikšmė - 7 dienos
-                
-            time_str = time_str.lower()
-            
-            # Ištraukiame skaitinius duomenis
-            if "minute" in time_str:
-                match = re.search(r'(\d+)\s*minute', time_str)
-                if match:
-                    return float(match.group(1)) / 60.0  # Konvertuojame minutes į valandas
-                    
-            elif "hour" in time_str:
-                match = re.search(r'(\d+)\s*hour', time_str)
-                if match:
-                    return float(match.group(1))  # Jau yra valandos
-                    
-            elif "day" in time_str:
-                match = re.search(r'(\d+)\s*day', time_str)
-                if match:
-                    return float(match.group(1)) * 24.0  # Konvertuojame dienas į valandas
-                    
-            elif "week" in time_str:
-                match = re.search(r'(\d+)\s*week', time_str)
-                if match:
-                    return float(match.group(1)) * 24.0 * 7.0  # Konvertuojame savaites į valandas
-                    
-            elif "month" in time_str:
-                match = re.search(r'(\d+)\s*month', time_str)
-                if match:
-                    return float(match.group(1)) * 24.0 * 30.0  # Apytiksliai konvertuojame mėnesius į valandas
-                    
-            elif "year" in time_str:
-                match = re.search(r'(\d+)\s*year', time_str)
-                if match:
-                    return float(match.group(1)) * 24.0 * 365.0  # Apytiksliai konvertuojame metus į valandas
-            
-            # Jei formatas neatpažintas, grąžiname maksimumą
-            return 168.0  # Default - 7 dienos
-            
-        except Exception as e:
-            logger.error(f"Error parsing created_time: {e}")
-            return 168.0  # Default reikšmė klaidos atveju
 
     def validate_interval(self, feature: str, interval: dict) -> dict:
         """Validuoja ir koreguoja intervalą pagal absoliučias ribas"""
@@ -1978,16 +1856,7 @@ class MLGEMAnalyzer:
                 # Pridėti šiuos patikrinimus į analyze_token metodą:
                 if self.interval_analyzer.filter_status.get('volume_5m', False):
                     primary_data['volume_5m'] = float(db_data.get('volume_5m', 0))
-
-                # Pridedame callers parametrą iš Call Analyser, jei jis yra įjungtas
-                if self.interval_analyzer.filter_status.get('callers', False) and 'call_analyser' in token_data:
-                    primary_data['callers'] = float(token_data['call_analyser'].get('callers', 0))
-
-                # Pridedame created_time_hours, jei filtras įjungtas
-                if self.interval_analyzer.filter_status.get('created_time_hours', False):
-                    created_time_str = db_data.get('created_time')
-                    primary_data['created_time_hours'] = self.interval_analyzer.parse_created_time(created_time_str)
-                                    
+                    
                 if self.interval_analyzer.filter_status.get('price_change_5m', False):
                     primary_data['price_change_5m'] = float(db_data.get('price_change_5m', 0))
                     
