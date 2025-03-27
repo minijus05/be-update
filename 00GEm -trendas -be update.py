@@ -29,7 +29,7 @@ class Config:
     # Telegram settings
     TELEGRAM_API_ID = '25425140'
     TELEGRAM_API_HASH = 'bd0054bc5393af360bc3930a27403c33'
-    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@signalsolanaby4am'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
+    TELEGRAM_SOURCE_CHATS = ['@botubotass', '@smartas1', '@pump2ray'] #'@solearlytrending', '@HighVolumeBordga', '@solanahypee'
     
     TELEGRAM_GEM_CHAT = '@testasmano'
     
@@ -134,7 +134,7 @@ class TokenMonitor:
             if token_addresses:
                 for address in token_addresses:
                     # Dar tikslesnė versija
-                    is_new_token = "Pumpfun" in message.lower() or ("ATH Price000" in message and "Backup BOT:" in message) or ("Pump King of the hill00" in message and "Backup BOT:" in message) 
+                    is_new_token = True
                     is_from_token = "fromss" in message.lower() or "MADEss" in message or "🔝seff" in message
                     
                     # Patikriname ar token'as jau yra DB
@@ -628,11 +628,21 @@ class TokenMonitor:
     def _extract_token_addresses(self, message: str) -> List[str]:
         """Ištraukia token adresus iš žinutės"""
         try:
+            # Pirmiausia pašaliname nematomus Unicode simbolius
+            cleaned_message = re.sub(r'[\u200B-\u200F\uFEFF]', '', message)
+            
             # Pirmiausiai ieškome tiesiogiai pateikto CA (Contract Address)
-            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}(?:pump)?)', message, re.MULTILINE)
+            ca_match = re.search(r'(?:(?:🪙|📃)\s*CA:|CA:|solscan\.io/token/)([A-Za-z0-9]{32,44}(?:pump)?)', cleaned_message, re.MULTILINE)
             if ca_match and 32 <= len(ca_match.group(1)) <= 44:
                 addr = ca_match.group(1)
                 logger.info(f"Found token address from CA: {addr}")
+                return [addr]
+            
+            # Taip pat pridedame specialų šabloną adresams iš CallAnalyser formato
+            call_analyzer_match = re.search(r'Total calls:\s*\d+\s*[\n\r]+\s*([A-Za-z0-9]{32,44}pump)\s*', cleaned_message)
+            if call_analyzer_match and 32 <= len(call_analyzer_match.group(1)) <= 44:
+                addr = call_analyzer_match.group(1)
+                logger.info(f"Found token address from Call Analyzer format: {addr}")
                 return [addr]
             
             # Jei CA nerastas, ieškome per URL patterns prioriteto tvarka
@@ -688,21 +698,33 @@ class TokenMonitor:
                 
                 # Generic URL patterns (catch-all)
                 r'/([A-Za-z0-9]{32,44})(?:/|$)',
-                r'=([A-Za-z0-9]{32,44})(?:&|$)'
+                r'=([A-Za-z0-9]{32,44})(?:&|$)',
+                
+                # Last resort - ieškome bet kokio adreso su 'pump' pabaigoje
+                r'([A-Za-z0-9]{32,44}pump)'
             ]
             
             # Ieškome per kiekvieną pattern, kol randame pirmą tinkamą adresą
             for pattern in patterns:
-                match = re.search(pattern, message)
+                match = re.search(pattern, cleaned_message)
                 if match:
                     addr = match.group(1)
                     if 32 <= len(addr) <= 44:
                         logger.info(f"Found token address: {addr}")
                         return [addr]
             
+            # Jei vis dar nieko neradome, bandome paskutinį būdą - ieškome bet kokio 44 simbolių teksto
+            # kuris panašus į Solana adresą ir baigiasi "pump"
+            last_resort_match = re.search(r'([\w]{32,44}pump)', cleaned_message)
+            if last_resort_match:
+                addr = last_resort_match.group(1)
+                if 32 <= len(addr) <= 44:
+                    logger.info(f"Found pump address as very last resort: {addr}")
+                    return [addr]
+            
             # Jei nieko neradome
             return []
-                
+                    
         except Exception as e:
             logger.error(f"Error extracting token address: {e}")
             return []
@@ -1337,7 +1359,7 @@ class MLIntervalAnalyzer:
                     'price_change_1h': False,
                     'bs_ratio_1h': False,
                     'volume_5m': False,           # Naujas
-                    'price_change_5m': True,     # Naujas
+                    'price_change_5m': False,     # Naujas
                     'bs_ratio_5m': False,     
                     'bundle_count': False,
                     'sniper_activity_tokens': False,
@@ -1354,7 +1376,7 @@ class MLIntervalAnalyzer:
 
         # Absoliučios ribos parametrams
         self.ABSOLUTE_LIMITS = {
-            'dev_created_tokens': (0, 5000),           # xxxxxxxxxxxxxxxxx
+            'dev_created_tokens': (0, 500),           # xxxxxxxxxxxxxxxxx
             'same_name_count': (0, 5500),               # xxxxxxxxxxxxxxx 
             'same_website_count': (0, 30000),            # xxxxxxxxxxxxxxxxx  
             'same_telegram_count': (0, 45000),           #  xxxxxxxxxxxxxxx
@@ -1363,10 +1385,10 @@ class MLIntervalAnalyzer:
             'price_change_1h': (-90, -50),      # xxxxxxxxxxxxxxxxx
             'market_cap': (1000, 10000000),      #  
             'volume_1h': (1000, 10000000),          #  
-            'holders_total': (5, 100000),         # xxxxxxxxxxxxx
+            'holders_total': (400, 100000),         # xxxxxxxxxxxxx
             'liquidity_usd': (0, 10000000),      #  
-            'total_scans': (1, 1000000),          # 
-            'traders_count': (5, 100000),         # xxxxxxxxxxxxx
+            'total_scans': (40, 1000000),          # 
+            'traders_count': (200, 10000),         # xxxxxxxxxxxxx
             'bundle_count': (0, 0),               # 
             'mint_status': (0, 0),                # 
             'freeze_status': (0, 0),              # 
@@ -1374,17 +1396,17 @@ class MLIntervalAnalyzer:
             'sniper_activity_tokens': (0, 0),     # 
             'bs_ratio_1h': (0.1, 10.0),           # 
             # Naujai pridedami parametrai
-            'sniper_activity_percentage': (0, 110),       # xxxxxxxxxxxxx
-            'notable_bundle_supply_percentage': (0, 600),  # xxxxxxxxxxxxx
-            'bundle_supply_percentage': (0, 160),          # xxxxxxxxxxxxxxxxxxx
+            'sniper_activity_percentage': (0, 11),       # xxxxxxxxxxxxx
+            'notable_bundle_supply_percentage': (0, 60),  # xxxxxxxxxxxxx
+            'bundle_supply_percentage': (0, 16),          # xxxxxxxxxxxxxxxxxxx
             'dev_sold_percentage': (50, 100),        # 
             'dev_bought_percentage': (0, 20),
             'price_change_5m': (-90, 200),      # 
             'volume_5m': (1000, 10000000),       # 
             'bs_ratio_5m': (0.1, 10.0),
-            'holders_top10_percentage': (1, 290),  #xxxxxxxxxxxxxx
-            'holders_top25_percentage': (1, 500),  #xxxxxxxxxxxxxx
-            'holders_top50_percentage': (1, 600)   #xxxxxxxxxxxxxx
+            'holders_top10_percentage': (1, 20),  #xxxxxxxxxxxxxx
+            'holders_top25_percentage': (1, 30),  #xxxxxxxxxxxxxx
+            'holders_top50_percentage': (1, 40)   #xxxxxxxxxxxxxx
         }
 
     def _parse_ratio_value(self, ratio_str) -> float:
